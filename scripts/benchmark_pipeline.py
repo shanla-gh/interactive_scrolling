@@ -2,7 +2,9 @@
 
 Measures camera start time, capture/processing rates, inference time, capture-to-result
 latency, dropped frames, process CPU and memory, and how many frames contained hands.
-No images are stored; only numbers are written.
+``--segmentation`` and ``--face`` also run the optional person-segmentation and face-landmark
+workers exactly as the application does (frame taps after hand tracking, 15 FPS limit), to
+measure their cost and their effect on the primary pipeline. No images are stored.
 
 Example:
     python scripts/benchmark_pipeline.py --duration 30 --resolution 1280x720
@@ -22,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _measure import environment, summarize
 from interactive_scrolling.config.settings import CameraSettings, TrackingSettings
+from interactive_scrolling.core.auxiliary import AuxiliaryWorker
 from interactive_scrolling.core.diagnostics import ResourceMonitor
 from interactive_scrolling.core.pipeline import (
     CameraState,
@@ -31,8 +34,14 @@ from interactive_scrolling.core.pipeline import (
 )
 from interactive_scrolling.core.platform import disable_power_throttling
 from interactive_scrolling.vision.camera import OpenCVCamera
+from interactive_scrolling.vision.face_tracker import MediaPipeFaceTracker
 from interactive_scrolling.vision.hand_tracker import MediaPipeHandTracker
-from interactive_scrolling.vision.model_assets import default_model_path
+from interactive_scrolling.vision.model_assets import (
+    FACE_MODEL,
+    SEGMENTER_MODEL,
+    default_model_path,
+)
+from interactive_scrolling.vision.segmenter import MediaPipePersonSegmenter
 
 
 class Collector:
@@ -65,6 +74,8 @@ def main() -> int:
     parser.add_argument("--resolution", default="1280x720")
     parser.add_argument("--inference-width", type=int, default=None)
     parser.add_argument("--output", type=Path, default=None, help="JSON report path")
+    parser.add_argument("--segmentation", action="store_true", help="run person segmentation")
+    parser.add_argument("--face", action="store_true", help="run face landmarks")
     parser.add_argument(
         "--allow-power-throttling",
         action="store_true",
@@ -85,6 +96,18 @@ def main() -> int:
         tracker_factory=lambda: MediaPipeHandTracker(tracking, model),
         inference_max_width=args.inference_width,
     )
+    workers: list[AuxiliaryWorker] = []
+    if args.segmentation:
+        workers.append(
+            AuxiliaryWorker(
+                "segmentation", lambda: MediaPipePersonSegmenter(SEGMENTER_MODEL.path())
+            )
+        )
+    if args.face:
+        workers.append(AuxiliaryWorker("face", lambda: MediaPipeFaceTracker(FACE_MODEL.path())))
+    for worker in workers:
+        pipeline.add_frame_tap(worker.submit)
+        worker.set_enabled(True)
     pipeline.launch()
     while pipeline.tracker_state in (TrackerState.NOT_LOADED, TrackerState.LOADING):
         time.sleep(0.01)
@@ -109,6 +132,9 @@ def main() -> int:
         collector.inference.clear()
         collector.hand_counts.clear()
     start_metrics = pipeline.metrics()
+    start_processed = {w.name: w.processed for w in workers}
+    for worker in workers:
+        worker.inference.reset()
     monitor.sample()
     samples = []
     started = time.perf_counter()
@@ -134,6 +160,20 @@ def main() -> int:
     pipeline.wait_for_camera_stop(10)
     stop_s = time.perf_counter() - stop_started
     clean = pipeline.shutdown()
+    optional = {
+        w.name: {
+            "state": w.state,
+            "message": w.message,
+            "results_per_s": round((w.processed - start_processed[w.name]) / elapsed, 1),
+            "inference_ms_mean": round(w.inference.mean(), 1) if w.inference.mean() else None,
+            "inference_ms_p95": round(w.inference.percentile(95), 1)
+            if w.inference.percentile(95)
+            else None,
+        }
+        for w in workers
+    }
+    for worker in workers:
+        worker.shutdown()
 
     with collector.lock:
         hand_counts = list(collector.hand_counts)
@@ -149,6 +189,7 @@ def main() -> int:
                 "duration_s": round(elapsed, 1),
                 "warmup_s": args.warmup,
             },
+            "optional_models": optional,
             "model_load_s": round(model_load_s, 2),
             "camera_start_s": round(camera_start_s, 2),
             "camera_stop_s": round(stop_s, 3),
