@@ -1,0 +1,114 @@
+"""Location, verification and one-time download of the hand landmarker model.
+
+The model file is not stored in the repository. It is downloaded once from Google's
+official MediaPipe model storage, verified against a pinned SHA-256 digest, and then
+used fully offline.
+
+Model: MediaPipe Hand Landmarker (``hand_landmarker.task``, float16, version 1).
+Published by Google under the Apache License 2.0; see ``docs/THIRD_PARTY_NOTICES.md``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+import tempfile
+import urllib.request
+from collections.abc import Callable
+from pathlib import Path
+from typing import BinaryIO
+
+log = logging.getLogger(__name__)
+
+MODEL_FILENAME = "hand_landmarker.task"
+MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
+    "hand_landmarker/float16/1/hand_landmarker.task"
+)
+MODEL_SHA256 = "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
+MODEL_SIZE_BYTES = 7_819_105
+MODEL_ENV_VAR = "INTERACTIVE_SCROLLING_MODEL"
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+"""Repository root when running from a source checkout (``src/`` layout)."""
+
+
+class ModelDownloadError(RuntimeError):
+    """The model could not be downloaded or failed verification."""
+
+
+def default_model_path() -> Path:
+    """Resolve the model location.
+
+    Order: the ``INTERACTIVE_SCROLLING_MODEL`` environment variable, then
+    ``<repository>/models/hand_landmarker.task``, then ``./models/hand_landmarker.task``.
+    The first existing file wins; if none exists the repository location is returned so
+    error messages and downloads point to the expected place.
+    """
+    env = os.environ.get(MODEL_ENV_VAR)
+    if env:
+        return Path(env)
+    candidates = [PROJECT_ROOT / "models" / MODEL_FILENAME, Path.cwd() / "models" / MODEL_FILENAME]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
+
+
+def sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_model(path: Path, expected_sha256: str = MODEL_SHA256) -> bool:
+    """Return ``True`` if ``path`` exists and matches the pinned digest."""
+    return path.is_file() and sha256_of(path) == expected_sha256
+
+
+Opener = Callable[[str], BinaryIO]
+
+
+def _urlopen(url: str) -> BinaryIO:
+    return urllib.request.urlopen(url, timeout=60)
+
+
+def download_model(
+    destination: Path,
+    url: str = MODEL_URL,
+    expected_sha256: str = MODEL_SHA256,
+    opener: Opener = _urlopen,
+) -> Path:
+    """Download the model to ``destination`` and verify its SHA-256 digest.
+
+    The file is written to a temporary file in the destination directory and only
+    moved into place after verification, so a failed or interrupted download never
+    leaves a corrupt model behind.
+    """
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    fd, tmp_name = tempfile.mkstemp(prefix=".download-", dir=destination.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            try:
+                with opener(url) as response:
+                    for chunk in iter(lambda: response.read(1 << 16), b""):
+                        digest.update(chunk)
+                        out.write(chunk)
+            except OSError as exc:
+                raise ModelDownloadError(f"Download failed: {exc}") from exc
+        actual = digest.hexdigest()
+        if actual != expected_sha256:
+            raise ModelDownloadError(
+                f"Downloaded model failed verification (sha256 {actual}, expected "
+                f"{expected_sha256})."
+            )
+        os.replace(tmp_path, destination)
+        log.info("Model downloaded and verified: %s", destination)
+        return destination
+    finally:
+        tmp_path.unlink(missing_ok=True)
