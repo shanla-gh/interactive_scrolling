@@ -7,6 +7,12 @@ pipeline metrics, process CPU/memory and the UI event-loop responsiveness (how l
 50 ms heartbeat timer fires). Camera restart timings are observed by the 1 s sampler, so
 they have one-second resolution. No images are stored.
 
+The window runs with the production services (gesture engine, dispatcher, browser bridge on a
+free port, local analytics in a temporary directory), so periodic UI work such as the daily
+statistics query is part of the measurement. The window's stall monitor attributes every UI
+stall to the running handler, garbage collection and worker-thread progress; the report lists
+these stalls and the measured duration of each UI handler.
+
 Example:
     python scripts/stability_session.py --minutes 10 --output reports/stability.json
 """
@@ -16,7 +22,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import socket
 import sys
+import tempfile
 import threading
 import time
 from datetime import UTC, datetime
@@ -34,8 +42,10 @@ from interactive_scrolling.config.settings import AppSettings
 from interactive_scrolling.core.diagnostics import ResourceMonitor
 from interactive_scrolling.core.pipeline import CameraState
 from interactive_scrolling.core.platform import disable_power_throttling
-from interactive_scrolling.services import offline_services
+from interactive_scrolling.services import build_services
+from interactive_scrolling.storage.settings_store import SettingsStore, UserSettings
 from interactive_scrolling.ui.main_window import MainWindow
+from interactive_scrolling.ui.stall_probe import EventProbe
 from interactive_scrolling.ui.theme import apply_theme
 from interactive_scrolling.vision.camera import OpenCVCamera
 from interactive_scrolling.vision.hand_tracker import MediaPipeHandTracker
@@ -77,16 +87,26 @@ def main() -> int:
     model = default_model_path()
     app = QApplication(sys.argv[:1])
     apply_theme(app)
+    data_dir = Path(tempfile.mkdtemp(prefix="is-stability-"))
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    SettingsStore(data_dir / "settings.json").save(UserSettings(bridge_port=port))
+    services = build_services(data_dir)
     window = MainWindow(
         settings,
         camera_factory=OpenCVCamera,
         tracker_factory=lambda: MediaPipeHandTracker(settings.tracking, model),
-        services=offline_services(),
+        services=services,
     )
+    probe = EventProbe()
+    probe.attach(app)
+    window.stall_monitor.context_provider = probe.describe
     window.show()
     monitor = ResourceMonitor()
 
     duration_s = args.minutes * 60
+    start_ns = time.perf_counter_ns()
     samples: list[dict] = []
     heartbeat_lateness: list[float] = []
     restarts: list[dict] = []
@@ -110,7 +130,9 @@ def main() -> int:
         state["tick"] += 1
         elapsed = time.perf_counter() - state["start"]
         m = window.pipeline.metrics()
-        r = monitor.sample()
+        # Counting threads enumerates the whole system on Windows (~13 ms on the UI thread),
+        # so it is sampled every 10 s only.
+        r = monitor.sample(include_threads=state["tick"] % 10 == 0)
         frame = window.video.frame
         samples.append(
             {
@@ -231,11 +253,33 @@ def main() -> int:
             "rss_last_minute_mean": round(sum(last_minute) / len(last_minute), 1)
             if last_minute
             else None,
-            "threads": summarize([float(s["threads"]) for s in samples]),
+            "threads": summarize(
+                [float(s["threads"]) for s in samples if s["threads"] is not None]
+            ),
             "ui_heartbeat_lateness_ms": summarize(heartbeat_lateness),
             "samples_with_hands": sum(1 for s in samples if s["hands"]),
             "frames_dropped_total": samples[-1]["dropped_total"] if samples else None,
             "camera_restarts": restarts,
+            "ui_stalls": [
+                {
+                    "duration_ms": round(st.duration_ms, 1),
+                    "section": st.section,
+                    "gc_ms": round(st.gc_ms, 1),
+                    "worker_gaps_ms": {k: round(v, 1) for k, v in st.worker_gaps_ms.items()},
+                    "ui_stack_top": [line.strip() for line in st.ui_stack[-3:]],
+                    "qt": st.context,
+                    "at_s": round((st.started_ns - start_ns) / 1e9, 1),
+                }
+                for st in window.stall_monitor.stalls
+            ],
+            "ui_sections_ms": {
+                name: {
+                    "calls": v.calls,
+                    "mean": round(v.mean_ms, 3),
+                    "max": round(v.max_ms, 1),
+                }
+                for name, v in window.stall_monitor.section_stats().items()
+            },
             "warnings_and_errors": warnings.records[-50:],
             "samples": samples,
         }
