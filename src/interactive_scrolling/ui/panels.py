@@ -53,6 +53,9 @@ class Card(QFrame):
         key_label.setObjectName("rowKey")
         value = QLabel(NO_DATA)
         value.setObjectName("rowValueAccent" if accent else "rowValue")
+        # Long values wrap instead of widening the side panel beyond its tab.
+        value.setWordWrap(True)
+        value.setMinimumWidth(0)
         if tooltip:
             key_label.setToolTip(tooltip)
             value.setToolTip(tooltip)

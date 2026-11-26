@@ -6,10 +6,11 @@ import logging
 import threading
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QColor
+from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -18,11 +19,13 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from interactive_scrolling import __version__
+from interactive_scrolling.actions.types import ActionRecord, ActionStatus, ControlMode
 from interactive_scrolling.config.settings import SUPPORTED_RESOLUTIONS, AppSettings, CameraSettings
 from interactive_scrolling.core.diagnostics import ResourceMonitor
 from interactive_scrolling.core.pipeline import (
@@ -32,9 +35,16 @@ from interactive_scrolling.core.pipeline import (
     TrackerState,
     VisionPipeline,
 )
+from interactive_scrolling.gestures.types import GestureEvent
+from interactive_scrolling.services import ControlServices, offline_services
 from interactive_scrolling.ui.bridge import PipelineBridge, QtLogHandler
+from interactive_scrolling.ui.control_bar import ControlBar
+from interactive_scrolling.ui.gesture_panels import GestureHistory, GesturePanel
+from interactive_scrolling.ui.hotkey import GlobalHotkey
 from interactive_scrolling.ui.panels import MotionPanel, OverlayPanel, TrackingPanel
+from interactive_scrolling.ui.settings_dialog import GestureSettingsDialog
 from interactive_scrolling.ui.video_view import VideoView
+from interactive_scrolling.ui.youtube_panel import StatsPanel, YouTubePanel
 from interactive_scrolling.vision.camera import CameraInfo
 from interactive_scrolling.visualization import palette
 
@@ -53,6 +63,13 @@ class _ProbeSignals(QObject):
     finished = Signal(list)
 
 
+class _ControlSignals(QObject):
+    """Dispatcher notifications (any thread) marshalled to the UI thread."""
+
+    record = Signal(object)
+    mode = Signal(object, object, str)
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -61,9 +78,12 @@ class MainWindow(QMainWindow):
         tracker_factory: TrackerFactory | None,
         probe_cameras: ProbeFunction | None = None,
         resource_monitor: ResourceMonitor | None = None,
+        services: ControlServices | None = None,
+        register_hotkey: bool = False,
     ) -> None:
         super().__init__()
         self.settings = settings
+        self.services = services or offline_services(settings.gestures)
         self._probe_cameras = probe_cameras
         self._resources = resource_monitor or ResourceMonitor()
         self._camera_state = CameraState.STOPPED
@@ -82,6 +102,8 @@ class MainWindow(QMainWindow):
             tracker_factory=tracker_factory,
             motion_settings=settings.motion,
             inference_max_width=settings.tracking.inference_max_width,
+            gesture_engine=self.services.engine,
+            on_gesture_event=self._on_gesture_event,
         )
 
         self.video = VideoView(settings.overlay)
@@ -90,12 +112,19 @@ class MainWindow(QMainWindow):
         self.tracking_panel = TrackingPanel()
         self.motion_panel = MotionPanel()
         self.overlay_panel = OverlayPanel(settings.overlay, settings.mirror_preview)
+        self.control_bar = ControlBar()
+        self.gesture_panel = GesturePanel()
+        self.history = GestureHistory()
+        user = self.services.user_settings
+        self.youtube_panel = YouTubePanel(user.pairing_token, user.bridge_port)
+        self.stats_panel = StatsPanel(user.analytics_enabled)
 
         central = QWidget()
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         root.addWidget(self._build_header())
+        root.addWidget(self.control_bar)
         root.addWidget(self._build_body(), 1)
         root.addWidget(self._build_status_bar())
         self.setCentralWidget(central)
@@ -108,6 +137,23 @@ class MainWindow(QMainWindow):
         self.bridge.tracker_state_changed.connect(self._on_tracker_state, queued)
         self.overlay_panel.changed.connect(self.video.update)
         self.overlay_panel.mirror_changed.connect(self._on_mirror_changed)
+
+        self._control_signals = _ControlSignals()
+        self._control_signals.record.connect(self._on_record, queued)
+        self._control_signals.mode.connect(self._on_mode_changed, queued)
+        self.services.dispatcher.add_record_listener(self._control_signals.record.emit)
+        self.services.dispatcher.add_mode_listener(self._control_signals.mode.emit)
+        self.control_bar.mode_requested.connect(self.set_control_mode)
+        self.control_bar.disable_requested.connect(self.emergency_disable)
+        self.gesture_panel.settings_requested.connect(self.open_gesture_settings)
+        self.stats_panel.enabled_changed.connect(self.services.set_analytics_enabled)
+        self.stats_panel.clear_requested.connect(self._clear_statistics)
+        self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self.escape_shortcut.activated.connect(self.emergency_disable)
+        self.hotkey = GlobalHotkey(self.emergency_disable)
+        if register_hotkey and self.hotkey.register():
+            QCoreApplication.instance().installNativeEventFilter(self.hotkey)
+        self.control_bar.set_hotkey_hint(self.hotkey.label)
 
         self.log_handler = QtLogHandler()
         self.log_handler.emitter.record.connect(self._append_log)
@@ -126,6 +172,12 @@ class MainWindow(QMainWindow):
         self.diagnostics_timer.timeout.connect(self._update_diagnostics)
         self.diagnostics_timer.start()
         self._update_diagnostics()
+        self.status_timer = QTimer(self)
+        self.status_timer.setInterval(500)
+        self.status_timer.timeout.connect(self._update_control_status)
+        self.status_timer.start()
+        self._stats_tick = 0
+        self._update_control_status()
 
         self._apply_camera_state(CameraState.STOPPED)
         log.info("interactive_scrolling %s started. All processing runs locally.", __version__)
@@ -204,25 +256,34 @@ class MainWindow(QMainWindow):
         top_layout.setSpacing(16)
         top_layout.addWidget(self.video, 1)
 
-        side = QWidget()
-        side_layout = QVBoxLayout(side)
-        side_layout.setContentsMargins(0, 0, 4, 0)
-        side_layout.setSpacing(12)
-        side_layout.addWidget(self.tracking_panel)
-        side_layout.addWidget(self.motion_panel)
-        side_layout.addWidget(self.overlay_panel)
-        side_layout.addStretch(1)
-        scroll = QScrollArea()
-        scroll.setWidget(side)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setFixedWidth(340)
-        top_layout.addWidget(scroll)
+        self.side_tabs = QTabWidget()
+        self.side_tabs.setObjectName("sideTabs")
+        self.side_tabs.setFixedWidth(360)
+        for title, panels in (
+            ("Gestures", [self.gesture_panel]),
+            ("YouTube", [self.youtube_panel, self.stats_panel]),
+            ("Tracking", [self.tracking_panel, self.motion_panel]),
+            ("View", [self.overlay_panel]),
+        ):
+            self.side_tabs.addTab(self._scroll_page(panels), title)
+        top_layout.addWidget(self.side_tabs)
         splitter.addWidget(top)
+
+        bottom = QSplitter(Qt.Orientation.Horizontal)
+        bottom.setChildrenCollapsible(False)
+        history_container = QWidget()
+        history_layout = QVBoxLayout(history_container)
+        history_layout.setContentsMargins(16, 4, 8, 12)
+        history_layout.setSpacing(6)
+        history_heading = QLabel("GESTURE HISTORY")
+        history_heading.setObjectName("cardTitle")
+        history_layout.addWidget(history_heading)
+        history_layout.addWidget(self.history)
+        bottom.addWidget(history_container)
 
         log_container = QWidget()
         log_layout = QVBoxLayout(log_container)
-        log_layout.setContentsMargins(16, 4, 16, 12)
+        log_layout.setContentsMargins(8, 4, 16, 12)
         log_layout.setSpacing(6)
         heading = QLabel("LIVE ACTIVITY  /  DIAGNOSTICS")
         heading.setObjectName("cardTitle")
@@ -233,11 +294,28 @@ class MainWindow(QMainWindow):
         self.activity_log.setMaximumBlockCount(500)
         self.activity_log.setMinimumHeight(60)
         log_layout.addWidget(self.activity_log)
-        splitter.addWidget(log_container)
+        bottom.addWidget(log_container)
+        bottom.setSizes([560, 560])
+        splitter.addWidget(bottom)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
-        splitter.setSizes([700, 130])
+        splitter.setSizes([640, 170])
         return splitter
+
+    @staticmethod
+    def _scroll_page(panels: list[QWidget]) -> QScrollArea:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 8, 4, 0)
+        layout.setSpacing(12)
+        for panel in panels:
+            layout.addWidget(panel)
+        layout.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidget(page)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        return scroll
 
     def _build_status_bar(self) -> QWidget:
         bar = QFrame()
@@ -356,12 +434,88 @@ class MainWindow(QMainWindow):
         self.video.set_frame(frame)
         self.tracking_panel.update_tracking(frame.tracking)
         self.motion_panel.update_motion(frame, self.video.mirrored)
+        enabled = self.services.dispatcher.mode is not ControlMode.TRACKING_ONLY
+        self.gesture_panel.show_frame(frame.gestures, enabled)
 
     def _on_mirror_changed(self, mirrored: bool) -> None:
         self.settings.mirror_preview = mirrored
         self.video.set_mirrored(mirrored)
         if self.video.frame is not None:
             self.motion_panel.update_motion(self.video.frame, mirrored)
+
+    # ------------------------------------------------------------------ gesture control
+
+    def set_control_mode(self, mode: ControlMode) -> None:
+        """Switch Tracking only / Gesture test / Live control (deliberate user action)."""
+        self.services.dispatcher.set_mode(mode)
+        self.control_bar.set_mode(self.services.dispatcher.mode)
+
+    def emergency_disable(self) -> None:
+        if self.services.dispatcher.mode is not ControlMode.TRACKING_ONLY:
+            self.services.dispatcher.emergency_disable()
+        self.control_bar.set_mode(ControlMode.TRACKING_ONLY)
+
+    def _on_mode_changed(self, old: ControlMode, new: ControlMode, reason: str) -> None:
+        self.pipeline.set_gestures_enabled(new is not ControlMode.TRACKING_ONLY)
+        self.control_bar.set_mode(new)
+        if new is ControlMode.TRACKING_ONLY:
+            self.gesture_panel.show_frame(None, enabled=False)
+        if new is ControlMode.LIVE_CONTROL:
+            log.warning("LIVE CONTROL enabled: confirmed gestures will control YouTube Shorts.")
+
+    def _on_gesture_event(self, event: GestureEvent) -> None:
+        # Called on the processing thread; submitting never blocks.
+        self.services.dispatcher.submit(event)
+
+    def _on_record(self, record: ActionRecord) -> None:
+        first = self.history.outcome_of(record.record_id) is None
+        self.history.update_record(record)
+        self.gesture_panel.show_record(record)
+        if first:
+            self.video.show_gesture(record.event.gesture.label)
+        if record.status.final or record.status is ActionStatus.DISPATCHED:
+            self.control_bar.set_last(
+                f"{record.event.gesture.label} \u2192 {record.action.label}: {record.status.value}"
+            )
+            if record.status.final and record.status is not ActionStatus.NOT_EXECUTED:
+                log.info(
+                    "%s -> %s: %s%s",
+                    record.event.gesture.label,
+                    record.action.label,
+                    record.status.value,
+                    f" ({record.reason})" if record.reason else "",
+                )
+
+    def open_gesture_settings(self) -> None:
+        dialog = GestureSettingsDialog(
+            self.services.engine.settings, self.services.dispatcher.mapping, self
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.services.apply_gesture_settings(dialog.result_settings())
+            self.services.apply_mapping(dialog.result_mapping())
+            log.info("Gesture settings saved.")
+
+    def _clear_statistics(self) -> None:
+        analytics = self.services.analytics
+        if analytics is not None and analytics.clear():
+            log.info("Local statistics cleared.")
+        self._stats_tick = 0
+        self._update_control_status()
+
+    def _update_control_status(self) -> None:
+        controller = self.services.controller
+        status = controller.status() if controller is not None else None
+        self.youtube_panel.show_status(status)
+        if status is None:
+            self.control_bar.set_youtube("YouTube: not available", False)
+        elif status.ready:
+            self.control_bar.set_youtube(f"YouTube: ready ({status.target_browser})", True)
+        else:
+            self.control_bar.set_youtube(f"YouTube: {status.reason}", False)
+        analytics = self.services.analytics
+        if analytics is not None and self._stats_tick % 4 == 0:
+            self.stats_panel.show_stats(analytics.daily_stats(), analytics.error)
+        self._stats_tick += 1
 
     # ------------------------------------------------------------------ camera scan
 
@@ -433,10 +587,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ shutdown
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self.services.dispatcher.emergency_disable()
+        self.hotkey.unregister()
+        self.status_timer.stop()
         self.diagnostics_timer.stop()
         logging.getLogger("interactive_scrolling").removeHandler(self.log_handler)
         if not self.pipeline.shutdown(timeout_s=5.0):
             log.error("Pipeline did not shut down cleanly.")
+        self.services.shutdown()
         event.accept()
 
 

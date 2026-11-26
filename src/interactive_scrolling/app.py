@@ -129,11 +129,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.setApplicationVersion(__version__)
     apply_theme(app)
 
+    from interactive_scrolling.services import build_services
+
+    services = build_services()
     window = MainWindow(
         settings,
         camera_factory=OpenCVCamera,
         tracker_factory=tracker_factory,
         probe_cameras=partial(probe_cameras, 4, settings.camera.backend),
+        services=services,
+        register_hotkey=True,
     )
     window.show()
     if args.auto_start:

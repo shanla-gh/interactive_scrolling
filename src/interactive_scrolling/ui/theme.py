@@ -99,6 +99,54 @@ QPlainTextEdit#activityLog {{
 }}
 #statusBar QLabel#privacyBadge {{ color: {p.ACCENT_GREEN}; }}
 QScrollArea {{ border: none; }}
+#controlBar {{ background-color: {p.BACKGROUND}; border-bottom: 1px solid {p.BORDER}; }}
+#controlBar[live="true"] {{ background-color: #1d1113; border-bottom: 1px solid #6b2830; }}
+QPushButton#modeButton {{ padding: 5px 12px; color: {p.TEXT_MUTED}; }}
+QPushButton#modeButton:checked {{
+    background-color: #12352a; color: {p.ACCENT_GREEN}; border-color: #1f6b47; font-weight: 700;
+}}
+QPushButton#modeButton[mode="live_control"]:checked {{
+    background-color: #3a1a20; color: {p.ACCENT_RED}; border-color: {p.ACCENT_RED};
+}}
+QPushButton#disableButton {{
+    background-color: #3a1a20; color: {p.ACCENT_RED}; border: 1px solid #6b2830; font-weight: 700;
+}}
+QPushButton#disableButton:disabled {{
+    background-color: {p.SURFACE_RAISED}; color: {p.TEXT_DIM}; border-color: {p.BORDER};
+}}
+QLabel#chip {{
+    background-color: {p.SURFACE}; border: 1px solid {p.BORDER}; border-radius: 10px;
+    padding: 3px 10px; color: {p.TEXT_MUTED}; font-size: 9pt;
+}}
+QLabel#chip[state="ok"] {{ color: {p.ACCENT_GREEN}; border-color: #1f6b47; }}
+QLabel#chip[state="warn"] {{ color: {p.ACCENT_AMBER}; }}
+QTabWidget#sideTabs::pane {{ border: none; }}
+QTabBar::tab {{
+    background: {p.SURFACE}; color: {p.TEXT_MUTED}; padding: 6px 12px; margin-right: 2px;
+    border: 1px solid {p.BORDER}; border-bottom: none;
+    border-top-left-radius: 6px; border-top-right-radius: 6px;
+}}
+QTabBar::tab:selected {{ background: {p.SURFACE_RAISED}; color: {p.ACCENT_GREEN}; }}
+QTableWidget#gestureHistory {{
+    background-color: {p.SURFACE}; border: 1px solid {p.BORDER}; border-radius: 8px;
+    gridline-color: {p.SURFACE_RAISED}; font-family: "Cascadia Mono", "Consolas";
+    font-size: 8.5pt;
+}}
+QHeaderView::section {{
+    background-color: {p.SURFACE_RAISED}; color: {p.TEXT_MUTED}; border: none; padding: 4px;
+    font-size: 8pt; font-weight: 700;
+}}
+QProgressBar {{ background: {p.SURFACE_RAISED}; border: none; border-radius: 3px; }}
+QProgressBar::chunk {{ background: {p.ACCENT_AMBER}; border-radius: 3px; }}
+QGroupBox {{
+    border: 1px solid {p.BORDER}; border-radius: 8px; margin-top: 12px; padding-top: 6px;
+    color: {p.TEXT_MUTED}; font-weight: 700;
+}}
+QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
+QDoubleSpinBox {{
+    background-color: {p.SURFACE_RAISED}; border: 1px solid {p.BORDER}; border-radius: 6px;
+    padding: 3px 6px;
+}}
 QScrollBar:vertical {{ background: {p.BACKGROUND}; width: 8px; margin: 0; }}
 QScrollBar::handle:vertical {{ background: {p.BORDER}; border-radius: 4px; min-height: 24px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
