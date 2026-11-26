@@ -95,14 +95,52 @@ PROMPTS_2: list[tuple[str, float, str]] = [
     ("neg_face", 10, "Touch your face, adjust your hair, scratch your head."),
 ]
 
+# Third session (Brief 003): the four index-finger swipes, the half-heart, the stop pose and the
+# negatives the new gestures must not be confused with. Record it once with each hand.
+PROMPTS_3: list[tuple[str, float, str]] = [
+    ("neg_rest", 5, "Sit normally. Hands relaxed."),
+    (
+        "index_down_x4",
+        14,
+        "POINT with your index finger and swipe DOWN, 4 times. Return as you like.",
+    ),
+    ("neg_rest", 3, "Relax."),
+    ("index_up_x4", 14, "POINT and swipe UP, 4 times."),
+    ("neg_rest", 3, "Relax."),
+    ("index_right_x4", 14, "POINT and swipe to YOUR RIGHT, 4 times."),
+    ("neg_rest", 3, "Relax."),
+    ("index_left_x4", 14, "POINT and swipe to YOUR LEFT, 4 times."),
+    ("neg_rest", 3, "Relax."),
+    (
+        "index_next_prev",
+        12,
+        "POINT: swipe DOWN, bring the hand back, pause, then swipe UP. Do this twice.",
+    ),
+    ("neg_rest", 3, "Relax."),
+    ("half_heart_x3", 14, "HALF HEART (one hand) for about one second, lower it, 3 times."),
+    ("neg_rest", 3, "Relax."),
+    ("half_heart_hold", 6, "HALF HEART and keep holding it for the whole prompt."),
+    ("neg_rest", 3, "Relax."),
+    ("pose_stop", 5, "STOP: open hand, fingers up, palm to the camera. Hold."),
+    ("neg_rest", 3, "Lower your hand."),
+    ("neg_pinch", 8, "PINCH your thumb and index finger together a few times."),
+    ("neg_c_shape", 8, "Make a C shape with your hand (as if holding a cup), move it a little."),
+    ("pose_thumbs_up", 5, "THUMBS UP. Hold still. (This must NOT be a like any more.)"),
+    ("pose_pointing", 5, "POINT with your index finger and hold still."),
+    ("neg_diagonal", 10, "POINT and move diagonally (up-left, down-right...), a few times."),
+    ("neg_natural", 12, "Move naturally: touch your face or hair, reach for the mouse, wave."),
+    ("neg_typing", 10, "Pretend to type and use the mouse."),
+    ("neg_two_hands", 8, "Show BOTH hands and move them naturally (no gestures)."),
+]
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--output-dir", type=Path, default=Path("recordings"))
-    parser.add_argument("--session", type=int, choices=[1, 2], default=1)
+    parser.add_argument("--session", type=int, choices=[1, 2, 3], default=3)
     args = parser.parse_args()
-    prompts = PROMPTS if args.session == 1 else PROMPTS_2
+    prompts = {1: PROMPTS, 2: PROMPTS_2, 3: PROMPTS_3}[args.session]
     disable_power_throttling()
 
     frames: list[dict] = []
