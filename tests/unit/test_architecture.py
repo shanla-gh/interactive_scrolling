@@ -73,6 +73,14 @@ FORBIDDEN: dict[str, tuple[str, ...]] = {
         "interactive_scrolling.core.pipeline",
         "interactive_scrolling.integrations",
     ),
+    "integrations/coop": (
+        "PySide6",
+        "cv2",
+        "mediapipe",
+        "interactive_scrolling.ui",
+        "interactive_scrolling.storage",
+        "interactive_scrolling.integrations.youtube",
+    ),
     "integrations/youtube": (
         "PySide6",
         "cv2",

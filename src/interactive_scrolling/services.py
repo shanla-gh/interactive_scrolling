@@ -29,6 +29,12 @@ from interactive_scrolling.actions.types import (
 )
 from interactive_scrolling.config.settings import GestureSettings
 from interactive_scrolling.gestures.engine import GestureEngine
+from interactive_scrolling.integrations.coop.session import (
+    CoopGuest,
+    CoopGuestController,
+    CoopHost,
+    CoopStatus,
+)
 from interactive_scrolling.integrations.youtube.bridge import BridgeServer
 from interactive_scrolling.integrations.youtube.controller import YouTubeShortsController
 from interactive_scrolling.storage.analytics import AnalyticsStore, EventKind
@@ -108,6 +114,52 @@ class ControlServices:
                 totals.blinks,
                 totals.longest_screen_s,
             )
+
+    # ------------------------------------------------------------------ co-op
+
+    def coop_status(self) -> CoopStatus:
+        guest = getattr(self, "_coop_guest", None)
+        if guest is not None and guest.connected:
+            return guest.status()
+        host = getattr(self, "_coop_host", None)
+        if host is not None:
+            return host.status()
+        if guest is not None:
+            return guest.status()
+        return CoopStatus(role="off", state="no session")
+
+    def host_coop(self, name: str, port: int) -> str:
+        """Create a co-op session on this computer (this browser is the shared feed)."""
+        self.leave_coop()
+        host = getattr(self, "_coop_host", None)
+        if host is None:
+            host = CoopHost(self.dispatcher, name, port)
+            self._coop_host = host
+        return host.start(name, port)
+
+    def end_coop(self) -> None:
+        host = getattr(self, "_coop_host", None)
+        if host is not None:
+            host.stop()
+
+    def join_coop(self, name: str, address: str, port: int, code: str) -> None:
+        """Join a session as Guest (blocking, at most a few seconds; call off the UI thread).
+        While joined, this computer's shared gestures go to the Host instead of the local
+        browser."""
+        self.end_coop()
+        self.leave_coop()
+        guest = CoopGuest(name)
+        guest.connect(address, port, code)
+        self._coop_guest = guest
+        self._local_controller = self.dispatcher.set_controller(CoopGuestController(guest))
+
+    def leave_coop(self) -> None:
+        guest = getattr(self, "_coop_guest", None)
+        if guest is None:
+            return
+        guest.disconnect()
+        self._coop_guest = None
+        self.dispatcher.set_controller(getattr(self, "_local_controller", None))
 
     def apply_effects(self, settings) -> None:  # type: ignore[no-untyped-def]
         self.update_settings(effects=settings)
@@ -276,6 +328,8 @@ class ControlServices:
     # ------------------------------------------------------------------ lifecycle
 
     def shutdown(self) -> None:
+        self.leave_coop()
+        self.end_coop()
         self._stop.set()
         if self._activity_thread is not None:
             self._activity_thread.join(timeout=3)

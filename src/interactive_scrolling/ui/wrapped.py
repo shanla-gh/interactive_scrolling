@@ -221,7 +221,7 @@ def render_wrapped(data: WrappedData, humorous: bool = True) -> tuple[QImage, Ca
         ("NEXT / PREV", f"{data.next_previous[0]} / {data.next_previous[1]}"),
         ("TABS  → / ←", f"{data.tabs[0]} / {data.tabs[1]}"),
         ("LIKES", str(data.likes)),
-        ("GESTURES", str(data.gestures)),
+        ("SHARED ACTIONS" if data.participants else "GESTURES", str(data.gestures)),
     ]
     col_w = (inner - 40) / 2
     for i, (name, number) in enumerate(stats):

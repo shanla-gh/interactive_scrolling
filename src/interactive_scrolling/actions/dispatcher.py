@@ -140,12 +140,33 @@ class ActionDispatcher:
 
     # ------------------------------------------------------------------ submission
 
-    def submit(self, event: GestureEvent) -> ActionRecord:
-        """Handle a confirmed gesture. Safe to call from any thread; never blocks."""
+    def set_controller(self, controller: ActionController | None) -> ActionController | None:
+        """Replace the controller (co-op guest forwarding); returns the previous one. Pending
+        requests are abandoned first so nothing runs against the wrong controller."""
+        with self._lock:
+            previous = self._controller
+            self._generation += 1
+            self._drain_queue("controller changed")
+            self._controller = controller
+        if previous is not None:
+            try:
+                previous.cancel_all()
+            except Exception:
+                log.exception("Controller cancel failed")
+        return previous
+
+    def submit(
+        self, event: GestureEvent, action: ActionType | None = None, source: str = "local"
+    ) -> ActionRecord:
+        """Handle a confirmed gesture. Safe to call from any thread; never blocks.
+
+        ``action`` overrides the gesture mapping (co-op requests carry their action) and
+        ``source`` attributes the request; all other rules are identical."""
         with self._lock:
             mode = self._mode
             generation = self._generation
-            action = self._mapping.get(event.gesture, ActionType.NONE)
+            if action is None:
+                action = self._mapping.get(event.gesture, ActionType.NONE)
         record = ActionRecord(
             record_id=event.event_id,
             event=event,
@@ -154,6 +175,7 @@ class ActionDispatcher:
             status=ActionStatus.QUEUED,
             created_ns=self._clock(),
             wall_time=time.time(),
+            source=source,
         )
         if mode is not ControlMode.LIVE_CONTROL:
             return self._finish(record, ActionStatus.NOT_EXECUTED, f"{mode.label} mode")

@@ -156,6 +156,8 @@ class ActionRecord:
     completed_ns: int | None = None
     wall_time: float = 0.0
     """Local wall-clock time (epoch seconds) when the gesture was confirmed, for display."""
+    source: str = "local"
+    """Who requested the action: "local" (this computer's gestures) or "guest" (co-op)."""
     extra: dict[str, str] = field(default_factory=dict)
 
     @property

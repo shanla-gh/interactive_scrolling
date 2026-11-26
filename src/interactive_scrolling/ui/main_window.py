@@ -44,6 +44,7 @@ from interactive_scrolling.services import ControlServices, offline_services
 from interactive_scrolling.ui.appearance_dialog import AppearanceDialog
 from interactive_scrolling.ui.bridge import PipelineBridge, QtLogHandler
 from interactive_scrolling.ui.control_bar import ControlBar
+from interactive_scrolling.ui.coop_panel import CoopPanel
 from interactive_scrolling.ui.creator_overlay import CreatorOverlay
 from interactive_scrolling.ui.effects_panel import (
     CalibrationDialog,
@@ -62,6 +63,7 @@ from interactive_scrolling.ui.settings_dialog import GestureSettingsDialog
 from interactive_scrolling.ui.tray import TrayController
 from interactive_scrolling.ui.video_view import VideoView
 from interactive_scrolling.ui.wrapped import (
+    WrappedData,
     WrappedDialog,
     render_wrapped,
     wrapped_from_report,
@@ -193,6 +195,15 @@ class MainWindow(QMainWindow):
         self.youtube_panel = YouTubePanel(user.pairing_token, user.bridge_port)
         self.today_panel = DailyReportPanel(user.analytics_enabled)
         self.performance_panel = PerformancePanel()
+        self.coop_panel = CoopPanel()
+        self.coop_panel.host_requested.connect(self.host_coop)
+        self.coop_panel.end_requested.connect(self.services.end_coop)
+        self.coop_panel.approve_requested.connect(self._approve_guest)
+        self.coop_panel.shared_control_changed.connect(self._set_shared_control)
+        self.coop_panel.join_requested.connect(self.join_coop)
+        self.coop_panel.leave_requested.connect(self.services.leave_coop)
+        self.coop_panel.wrapped_requested.connect(self.open_duo_wrapped)
+        self.coop_panel.join_signals.finished.connect(self._join_finished)
         self.visual_panel = VisualBehaviorPanel()
         self.visual_panel.calibrate_requested.connect(self.calibrate_eyes)
         self.visual_panel.settings_requested.connect(self.open_effects)
@@ -377,6 +388,7 @@ class MainWindow(QMainWindow):
             ("Gestures", [self.gesture_panel]),
             ("Today", [self.today_panel, self.visual_panel]),
             ("Browser", [self.youtube_panel]),
+            ("Co-op", [self.coop_panel]),
             ("Performance", [self.performance_panel, self.tracking_panel, self.motion_panel]),
             ("View", [self.overlay_panel, self.appearance_button]),
         ):
@@ -759,6 +771,75 @@ class MainWindow(QMainWindow):
         name = f"doomscroll-wrapped-{datetime.now():%Y-%m-%d-%H%M}.png"
         WrappedDialog(image, name, self).exec()
 
+    # ------------------------------------------------------------------ co-op
+
+    def host_coop(self, name: str, port: int) -> None:
+        try:
+            code = self.services.host_coop(name, port)
+        except (ValueError, OSError) as exc:
+            self.coop_panel.show_error(f"Could not create the session: {exc}")
+            return
+        self.coop_panel.show_error("")
+        log.info("Co-op session created. Code: %s", code)
+
+    def _approve_guest(self, approved: bool) -> None:
+        host = getattr(self.services, "_coop_host", None)
+        if host is not None:
+            host.approve(approved)
+
+    def _set_shared_control(self, enabled: bool) -> None:
+        host = getattr(self.services, "_coop_host", None)
+        if host is not None:
+            host.set_shared_control(enabled)
+
+    def join_coop(self, name: str, address: str, port: int, code: str) -> None:
+        signals = self.coop_panel.join_signals
+        self.coop_panel.show_error("Connecting...")
+
+        def run() -> None:
+            try:
+                self.services.join_coop(name, address, port, code)
+            except Exception as exc:  # reported in the panel, never raised into Qt
+                signals.finished.emit(str(exc))
+                return
+            signals.finished.emit("")
+
+        threading.Thread(target=run, name="coop-join", daemon=True).start()
+
+    def _join_finished(self, error: str) -> None:
+        self.coop_panel.show_error(error)
+        if not error:
+            log.info("Joined the co-op session; waiting for the host to approve.")
+
+    def open_duo_wrapped(self) -> None:
+        status = self.services.coop_status()
+        if status.role == "off" or not status.participants:
+            log.warning("Duo Wrapped is available to the Host during or right after a session.")
+            return
+        host = getattr(self.services, "_coop_host", None)
+        succeeded: dict[str, int] = {}
+        for participant in host.participants.values() if host is not None else ():
+            for action, count in participant.successes.items():
+                succeeded[action] = succeeded.get(action, 0) + count
+        data = WrappedData(
+            scope="Co-op session",
+            date_text=datetime.now().strftime("%a %d %b %Y"),
+            scrolling_s=status.session_s,
+            sessions=None,
+            longest_s=None,
+            next_previous=(succeeded.get("next_short", 0), succeeded.get("previous_short", 0)),
+            tabs=(0, 0),
+            likes=0,
+            gestures=sum(c for _, _, c in status.participants),
+            index=None,
+            title="Scrolling, but make it social"
+            if self.services.user_settings.wellbeing.humorous_labels
+            else "",
+            participants=tuple((n, c) for n, _, c in status.participants),
+        )
+        image, _ = render_wrapped(data, self.services.user_settings.wellbeing.humorous_labels)
+        WrappedDialog(image, f"duo-wrapped-{datetime.now():%Y-%m-%d-%H%M}.png", self).exec()
+
     def open_wellbeing(self) -> None:
         dialog = WellbeingDialog(self.services.user_settings.wellbeing, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -825,6 +906,7 @@ class MainWindow(QMainWindow):
             services.wellbeing.scrolling_paused, services.wellbeing.pause_reason
         )
         self.performance_panel.show_report(services.performance)
+        self.coop_panel.show_status(services.coop_status())
         effects = services.user_settings.effects
         self.visual_panel.show_report(
             effects.eye_analytics_enabled,
