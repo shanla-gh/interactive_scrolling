@@ -4,8 +4,8 @@ Source of truth for the current state of the project. Update it with every check
 
 | | |
 |---|---|
-| Version | 0.1.0.dev0 (development build, not released) |
-| Active milestone | M1 - awaiting owner visual sign-off; next: M2 (requires a new brief) |
+| Version | 0.1.0.dev0 (development build, not released); target of the current brief: 0.2.0-dev |
+| Active milestones | M2 Gesture Recognition Engine and M3 YouTube Shorts Integration (Engineering Brief 002) |
 | Last updated | 2026-11-26 |
 
 ## Milestones and checkpoints
@@ -19,24 +19,25 @@ Source of truth for the current state of the project. Update it with every check
 | **M0 Project Foundation** | **COMPLETED** | |
 | M1 CP 1.1 Webcam acquisition | COMPLETED | hardware tests, failure-path tests |
 | M1 CP 1.2 Hand tracking | COMPLETED | real-model tests, live detections |
-| M1 CP 1.3 Skeleton and landmark visualization | COMPLETED (owner visual sign-off pending) | pixel-alignment tests, real-landmark screenshots |
+| M1 CP 1.3 Skeleton and landmark visualization | COMPLETED | pixel-alignment tests, Director live test and screenshot |
 | M1 CP 1.4 Motion and vector engine | COMPLETED | 37 motion tests, 87-88 px/s measured vs 86.7 px/s true |
-| M1 CP 1.5 Desktop application | COMPLETED (owner visual sign-off pending) | UI tests, stability sessions |
+| M1 CP 1.5 Desktop application | COMPLETED | UI tests, stability sessions, Director live test |
 | M1 CP 1.6 Stability and performance | COMPLETED | two 10-minute GUI sessions, benchmarks |
-| **M1 Computer Vision & Live Visualization** | **BLOCKED** on the owner's visual confirmation ([checklist](docs/milestones/M1_MANUAL_VERIFICATION.md)) | [M1 report](docs/milestones/M1_COMPUTER_VISION.md) |
-| **Integration Audit 001** | **PASSED** (automated and hardware scope); owner visual check open | [audit](docs/audits/INTEGRATION_AUDIT_001.md) |
-| M2 - M6 | NOT_STARTED | [ROADMAP.md](ROADMAP.md) |
+| **M1 Computer Vision & Live Visualization** | **COMPLETED** (Director verified 2026-11-26) | [M1 report](docs/milestones/M1_COMPUTER_VISION.md), [Director verification](docs/milestones/M1_DIRECTOR_VERIFICATION.md) |
+| **Integration Audit 001** | **PASSED** | [audit](docs/audits/INTEGRATION_AUDIT_001.md) |
+| M2 Gesture Recognition Engine | IN_PROGRESS | Engineering Brief 002 |
+| M3 YouTube Shorts Integration | NOT_STARTED | Engineering Brief 002 |
+| M4 - M6 | NOT_STARTED | [ROADMAP.md](ROADMAP.md) |
 
-Why M1 is BLOCKED rather than COMPLETED: whether the skeleton visibly sits on the user's own
-fingers, whether handedness labels match the user's hands, and whether arrows match
-perceived movement can only be judged by a person in front of the camera. Everything that
-can be measured has been verified (pixel-level alignment, real landmarks on a real photo,
-live detections through the webcam, measured motion accuracy). Once the owner completes the
-checklist, record the results below and set M1 to COMPLETED.
+### Director verification (M1)
 
-### Owner verification results
-
-Not yet performed.
+The Director launched the application, tested it with the physical webcam, provided a
+screenshot of successful live hand tracking (preview, skeleton, landmarks, bounding box,
+handedness and motion analysis) and reported that everything appears to work correctly.
+Individual checklist results were not reported; the reconciliation is in
+[M1_DIRECTOR_VERIFICATION.md](docs/milestones/M1_DIRECTOR_VERIFICATION.md). Residual gaps:
+busy-camera and disconnect paths not exercised on real hardware; two-hand tracking and
+handedness correctness not explicitly confirmed on the Director's own hands.
 
 ## Test results (2026-11-26, commit 09c8c5f)
 
@@ -84,8 +85,7 @@ camera scan (ADR-010).
 
 | Severity | Issue |
 |---|---|
-| Medium | Owner visual sign-off of live overlay alignment pending (see above). |
-| Low | Tested on one machine and one built-in camera; busy-camera and USB-disconnect paths tested only with simulated devices. |
+| Low | Tested on one machine and one built-in camera; busy-camera and USB-disconnect paths tested only with simulated devices; two-hand tracking not explicitly confirmed by the Director. |
 | Low | One unexplained 222 ms UI stall in session 1 (none above 40 ms in session 2). |
 | Low | MediaPipe prints native log lines and a "NORM_RECT without IMAGE_DIMENSIONS" warning to the console from inside its graph. |
 | Low | First launch after a reboot can take several seconds to load the model (preview is live meanwhile). |
@@ -115,11 +115,5 @@ Followed by the documentation commit that adds this file.
 
 ## Recommended next steps
 
-1. Owner: run `scripts\run.ps1` and complete the
-   [M1 manual verification checklist](docs/milestones/M1_MANUAL_VERIFICATION.md); record the
-   results above and mark M1 COMPLETED (or report failures).
-2. Co-Director: review Integration Audit 001 and prepare the M2 (Gesture Recognition Engine)
-   brief. The motion engine already exposes per-hand fingertip/palm velocity, direction,
-   window displacement and stationary state for swipe detection; thumbs-up will need static
-   hand-shape features computed from the landmarks.
-3. Consider in M2/M5: persisted settings, camera names, profiling of the rare UI stall.
+Execute Engineering Brief 002 (M2 Gesture Recognition Engine, M3 YouTube Shorts Integration,
+Integration Audit 002).
