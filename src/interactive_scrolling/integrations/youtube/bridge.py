@@ -41,6 +41,8 @@ EXTENSION_ID = "phcdgkmcjbgdligepbkfkceejlbbmlio"
 ALLOWED_ORIGINS = frozenset({f"chrome-extension://{EXTENSION_ID}"})
 HELLO_TIMEOUT_S = 5.0
 MAX_INVALID_MESSAGES = 5
+MAX_CONNECTIONS = 8
+"""Simultaneous authenticated browser connections (a user has a handful of browsers at most)."""
 
 
 @dataclass(slots=True)
@@ -228,6 +230,13 @@ class BridgeServer:
             connection.close(4001, "unauthorized")
             return
         client = ClientInfo(uuid.uuid4().hex, hello.browser, hello.extension_version, self._clock())
+        with self._lock:
+            full = len(self._clients) >= MAX_CONNECTIONS
+        if full:
+            self.rejected_connections += 1
+            log.warning("Refused browser connection: %d already connected", MAX_CONNECTIONS)
+            connection.close(1013, "too many connections")
+            return
         with self._lock:
             self._clients[client.client_id] = client
             self._connections[client.client_id] = connection

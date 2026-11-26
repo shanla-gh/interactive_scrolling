@@ -155,13 +155,18 @@ class SettingsStore:
             "bridge_port": settings.bridge_port,
             "pairing_token": settings.pairing_token,
         }
+        tmp: str | None = None
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(prefix=".settings-", dir=self.path.parent)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2)
             os.replace(tmp, self.path)
+            tmp = None
             return True
-        except OSError as exc:
+        except (OSError, TypeError, ValueError) as exc:
             log.error("Could not save settings to %s: %s", self.path, exc)
             return False
+        finally:
+            if tmp is not None:
+                Path(tmp).unlink(missing_ok=True)
