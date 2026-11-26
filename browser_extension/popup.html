@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Interactive Scrolling</title>
+    <style>
+      body { margin: 0; width: 290px; font: 13px "Segoe UI", sans-serif; background: #0b0d10; color: #e6edf3; }
+      main { padding: 14px; }
+      h1 { margin: 0 0 2px; font-size: 15px; }
+      h1 span { color: #3dff9a; }
+      p { margin: 4px 0 10px; color: #8b949e; }
+      label { display: block; margin: 8px 0 4px; color: #8b949e; font-size: 12px; }
+      input { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 6px;
+              border: 1px solid #262b33; background: #1b1f26; color: #e6edf3; }
+      button { margin-top: 12px; width: 100%; padding: 7px; border-radius: 6px; border: 1px solid #1f6b47;
+               background: #12352a; color: #3dff9a; font-weight: 700; cursor: pointer; }
+      #status { margin-top: 10px; padding: 6px 8px; border-radius: 6px; background: #14171c; }
+      .connected { color: #3dff9a; } .problem { color: #ffb547; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>interactive<span>_scrolling</span></h1>
+      <p>Connects YouTube Shorts in this browser to the desktop app on this computer.</p>
+      <label for="token">Pairing code (from the app's YouTube panel)</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false" />
+      <label for="port">Local port</label>
+      <input id="port" type="number" min="1024" max="65535" />
+      <button id="save">Save and connect</button>
+      <div id="status">...</div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

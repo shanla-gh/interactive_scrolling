@@ -43,6 +43,35 @@ FORBIDDEN: dict[str, tuple[str, ...]] = {
         "interactive_scrolling.core.pipeline",
     ),
     "visualization": ("mediapipe", "cv2", "interactive_scrolling.ui"),
+    "gestures": (
+        "PySide6",
+        "cv2",
+        "mediapipe",
+        "interactive_scrolling.ui",
+        "interactive_scrolling.visualization",
+        "interactive_scrolling.core.pipeline",
+        "interactive_scrolling.actions",
+        "interactive_scrolling.integrations",
+        "interactive_scrolling.storage",
+    ),
+    "actions": (
+        "PySide6",
+        "cv2",
+        "mediapipe",
+        "interactive_scrolling.ui",
+        "interactive_scrolling.integrations",
+        "interactive_scrolling.storage",
+        "interactive_scrolling.core.pipeline",
+    ),
+    "storage": ("PySide6", "cv2", "mediapipe", "interactive_scrolling.ui"),
+    "integrations/youtube": (
+        "PySide6",
+        "cv2",
+        "mediapipe",
+        "interactive_scrolling.ui",
+        "interactive_scrolling.gestures",
+        "interactive_scrolling.storage",
+    ),
 }
 
 

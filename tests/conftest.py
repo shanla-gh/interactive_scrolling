@@ -8,7 +8,9 @@ Test categories
 * ``tests/hardware``     require a physical webcam; skipped unless ``--hardware`` is given.
 
 Markers: ``hardware`` (physical webcam), ``model`` (downloaded model file), ``network``
-(public test image download). Missing prerequisites skip with an explicit reason.
+(public test image download), ``browser`` (Microsoft Edge with the extension, offline fixture
+pages), ``live_youtube`` (the real YouTube website; opt in with ``--live-youtube``). Missing
+prerequisites skip with an explicit reason.
 """
 
 from __future__ import annotations
@@ -41,15 +43,22 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="run tests that need a physical webcam",
     )
+    parser.addoption(
+        "--live-youtube",
+        action="store_true",
+        default=False,
+        help="run tests against the real YouTube website (signed-out throw-away profile)",
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    if config.getoption("--hardware"):
-        return
-    skip = pytest.mark.skip(reason="needs a physical webcam; run with --hardware")
+    skip_hw = pytest.mark.skip(reason="needs a physical webcam; run with --hardware")
+    skip_live = pytest.mark.skip(reason="uses the real YouTube website; run with --live-youtube")
     for item in items:
-        if "hardware" in item.keywords:
-            item.add_marker(skip)
+        if "hardware" in item.keywords and not config.getoption("--hardware"):
+            item.add_marker(skip_hw)
+        if "live_youtube" in item.keywords and not config.getoption("--live-youtube"):
+            item.add_marker(skip_live)
 
 
 @pytest.fixture(scope="session")

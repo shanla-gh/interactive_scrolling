@@ -28,6 +28,7 @@ dependencies = [
     "numpy>=2.2,<2.3",
     "PySide6>=6.10.3,<6.11",
     "psutil>=7.2,<8",
+    "websockets>=15.0.1,<16",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +55,8 @@ markers = [
     "hardware: requires a physical webcam; skipped unless --hardware is passed",
     "model: requires the hand landmarker model file (models/hand_landmarker.task)",
     "network: downloads a public test asset; skipped when offline",
+    "browser: drives Microsoft Edge with the browser extension against local fixture pages",
+    "live_youtube: uses the real YouTube website; skipped unless --live-youtube is passed",
 ]
 qt_api = "pyside6"
 filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]

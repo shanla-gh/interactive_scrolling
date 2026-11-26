@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<!--
+  Test fixture reproducing the parts of the YouTube Shorts page structure that the extension
+  relies on (verified against the live site, Nov 2026): /shorts/<id> URLs, the navigation
+  buttons, the like button with aria-pressed, the #shorts-player video and the sign-in link /
+  avatar button. Behaviour is configurable through the query string:
+    signed_in=1   show the avatar button instead of the "Sign in" link
+    liked=<id>    start with this Short already liked
+    broken_nav=1  navigation buttons do nothing (to test unconfirmed navigation)
+-->
+<head>
+  <meta charset="utf-8" />
+  <title>Shorts fixture</title>
+  <style>
+    body { margin: 0; background: #000; color: #fff; font-family: sans-serif; }
+    #shorts-player video { width: 360px; height: 640px; background: #222; }
+    #navigation-button-up, #navigation-button-down { display: inline-block; margin: 4px; }
+  </style>
+</head>
+<body>
+  <div id="masthead"></div>
+  <ytd-shorts>
+    <div id="shorts-inner-container">
+      <ytd-reel-video-renderer id="reel-video-renderer">
+        <div id="shorts-player"><video muted playsinline></video></div>
+        <reel-action-bar-view-model>
+          <like-button-view-model>
+            <toggle-button-view-model><button-view-model><label>
+              <button aria-pressed="false" aria-label="like this video">Like</button>
+            </label></button-view-model></toggle-button-view-model>
+          </like-button-view-model>
+        </reel-action-bar-view-model>
+      </ytd-reel-video-renderer>
+    </div>
+    <div id="navigation-button-up"><button aria-label="Previous video">Up</button></div>
+    <div id="navigation-button-down"><button aria-label="Next video">Down</button></div>
+  </ytd-shorts>
+  <script>
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const ids = ["aaaaaaaaaa1", "bbbbbbbbbb2", "cccccccccc3"];
+      const liked = new Set(params.get("liked") ? [params.get("liked")] : []);
+      const masthead = document.getElementById("masthead");
+      if (params.get("signed_in") === "1") {
+        masthead.innerHTML = '<button id="avatar-btn">Account</button>';
+      } else {
+        masthead.innerHTML = '<a aria-label="Sign in" href="https://accounts.google.com/ServiceLogin">Sign in</a>';
+      }
+      const like = document.querySelector("like-button-view-model button");
+      const up = document.querySelector("#navigation-button-up button");
+      const down = document.querySelector("#navigation-button-down button");
+      const video = document.querySelector("#shorts-player video");
+      const current = () => location.pathname.split("/")[2];
+      function render() {
+        const index = ids.indexOf(current());
+        like.setAttribute("aria-pressed", liked.has(current()) ? "true" : "false");
+        up.disabled = index <= 0;
+        down.disabled = index >= ids.length - 1;
+      }
+      function go(delta) {
+        if (params.get("broken_nav") === "1") return;
+        const index = ids.indexOf(current());
+        const next = ids[index + delta];
+        if (!next) return;
+        // YouTube swaps the like button while the next Short loads.
+        like.remove();
+        setTimeout(() => {
+          history.pushState({}, "", "/shorts/" + next + location.search);
+          document.querySelector("toggle-button-view-model label").appendChild(like);
+          render();
+          window.dispatchEvent(new Event("yt-navigate-finish"));
+        }, 120);
+      }
+      up.addEventListener("click", () => go(-1));
+      down.addEventListener("click", () => go(1));
+      like.addEventListener("click", () => {
+        if (params.get("signed_in") !== "1") return;
+        setTimeout(() => {
+          liked.has(current()) ? liked.delete(current()) : liked.add(current());
+          render();
+        }, 150);
+      });
+      // A canvas stream stands in for the video file: real, pausable media without any download.
+      const canvas = document.createElement("canvas");
+      canvas.width = 72; canvas.height = 128;
+      const ctx = canvas.getContext("2d");
+      let frame = 0;
+      setInterval(() => { ctx.fillStyle = `hsl(${(frame++ * 7) % 360},60%,40%)`; ctx.fillRect(0, 0, 72, 128); }, 66);
+      video.srcObject = canvas.captureStream(15);
+      render();
+      video.play().catch(() => {});
+    })();
+  </script>
+</body>
+</html>
