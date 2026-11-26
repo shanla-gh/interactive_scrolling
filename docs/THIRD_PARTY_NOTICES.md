@@ -32,6 +32,7 @@ only for local hand-control interaction, consistent with those terms.
 | numpy | 2.2.6 | BSD-3-Clause |
 | PySide6 (Qt for Python) | 6.10.3 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only |
 | psutil | 7.2.2 | BSD-3-Clause |
+| websockets | 15.0.1 | BSD-3-Clause |
 
 Notable transitive dependencies (pulled in by mediapipe): matplotlib (PSF-based Matplotlib
 license), sounddevice (MIT), absl-py (Apache-2.0), flatbuffers (Apache-2.0), certifi

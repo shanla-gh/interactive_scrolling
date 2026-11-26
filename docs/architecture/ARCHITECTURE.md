@@ -1,6 +1,6 @@
 # Architecture
 
-Version 0.1.0.dev0 (Milestones 0 and 1).
+Version 0.2.0.dev0 (Milestones 0-3).
 
 ## Data flow
 
@@ -21,6 +21,14 @@ TrackingResult(hands: HandObservation[21x3] + handedness)  vision/landmarks.py
 MotionAnalyzer.update(tracking) -> MotionFrame             motion/analyzer.py
     |
     v
+GestureEngine.update(tracking, motion) -> GestureFrame     gestures/ (control hand, recognizers)
+    |  confirmed GestureEvent (not coalesced)
+    +──> ActionDispatcher (own thread)                       actions/dispatcher.py
+            mode / mapping / staleness / one-at-a-time
+            -> YouTubeShortsController -> BridgeServer       integrations/youtube/
+               -> loopback WebSocket -> browser extension    browser_extension/
+               -> confirmed outcome -> history, analytics    storage/analytics.py
+    |
 ProcessedFrame ──> PipelineListener (worker thread)
     |  PipelineBridge: coalesces frames, emits Qt signals  ui/bridge.py
     v
@@ -39,6 +47,11 @@ Screen
 | `vision` | Camera acquisition, landmark data model, MediaPipe adapter, model assets | `config`, `core.timing` (no Qt) |
 | `motion` | Timestamp-based displacement/velocity/direction, smoothing, trails | `config`, `vision.landmarks` (no Qt, no OpenCV) |
 | `visualization` | Source-to-view geometry (pure) and QPainter overlay renderer | `vision`, `motion`, `config`, QtGui |
+| `gestures` | Pose analysis, recognizers, gesture engine (no actions) | `config`, `core.timing`, `vision`, `motion` |
+| `actions` | Control modes, mapping, dispatcher, controller interface | `gestures`, `config`, `core.timing` |
+| `integrations/youtube` | Bridge server, protocol, YouTube controller | `actions`, `core.timing` |
+| `storage` | Settings store, analytics store | `config`, `actions`, `gestures` |
+| `services` | Composition of engine, dispatcher, bridge, analytics, settings | all non-UI packages |
 | `ui` | Qt Widgets window, panels, theme, worker-to-UI bridge | everything above |
 | `app` | Argument parsing, logging, object wiring, entry point | everything |
 
@@ -54,6 +67,9 @@ MediaPipe is imported only by `vision/hand_tracker.py`.
 | `tracker-loader` | until the model is loaded | creates the `HandTracker`, then hands it to the processing thread |
 | `camera-capture-N` | one per camera session | the `OpenCVCamera` (opened and released on this thread) |
 | `camera-scan` | one per user-initiated scan | temporary capture devices |
+| `action-dispatcher` | application | queued action, controller calls |
+| `browser-bridge` + per-connection threads | application | WebSocket server and connections |
+| `analytics-writer` | application | SQLite connection |
 
 Cross-thread communication uses only: the frame mailbox (capture -> processing), the
 listener callbacks (processing/capture -> bridge), and Qt queued signals (bridge -> UI).

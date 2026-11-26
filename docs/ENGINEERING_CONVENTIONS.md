@@ -25,7 +25,8 @@ without a new brief. Do not change the product vision.
 * Keep legally required copyright notices and third-party attribution (see
   `docs/THIRD_PARTY_NOTICES.md`). Do not fabricate authorship statements.
 * Never commit credentials, `.env` files, webcam recordings or screenshots, personal data,
-  machine-specific paths, downloaded models or test assets. Check `git status` and the diff
+  machine-specific paths, downloaded models or test assets. Gesture calibration recordings
+  (`recordings/`, landmark numbers of a real person's hands) stay local. Check `git status` and the diff
   before every commit.
 * Never force-push, rewrite published history or delete user files.
 * Do not publish stable releases or tags unless a brief explicitly asks for it.

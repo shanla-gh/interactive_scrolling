@@ -4,116 +4,103 @@ Source of truth for the current state of the project. Update it with every check
 
 | | |
 |---|---|
-| Version | 0.1.0.dev0 (development build, not released); target of the current brief: 0.2.0-dev |
-| Active milestones | M2 Gesture Recognition Engine and M3 YouTube Shorts Integration (Engineering Brief 002) |
+| Version | 0.2.0.dev0 (development build, not released) |
+| Active work | M2 + M3 awaiting Director verification; next: M4 (requires a new brief) |
 | Last updated | 2026-11-26 |
 
-## Milestones and checkpoints
+## Milestones
 
-| Checkpoint | Status | Evidence |
+| Milestone | Status | Evidence |
 |---|---|---|
-| M0 CP 0.1 Workspace and GitHub initialization | COMPLETED | [M0 report](docs/milestones/M0_PROJECT_FOUNDATION.md) |
-| M0 CP 0.2 Technology stack and architecture | COMPLETED | ADR-001..010, architecture tests |
-| M0 CP 0.3 Testing and development infrastructure | COMPLETED | local suite + CI run 45752920939 green |
-| M0 CP 0.4 Persistent documentation | COMPLETED | this file, conventions, README, roadmap |
-| **M0 Project Foundation** | **COMPLETED** | |
-| M1 CP 1.1 Webcam acquisition | COMPLETED | hardware tests, failure-path tests |
-| M1 CP 1.2 Hand tracking | COMPLETED | real-model tests, live detections |
-| M1 CP 1.3 Skeleton and landmark visualization | COMPLETED | pixel-alignment tests, Director live test and screenshot |
-| M1 CP 1.4 Motion and vector engine | COMPLETED | 37 motion tests, 87-88 px/s measured vs 86.7 px/s true |
-| M1 CP 1.5 Desktop application | COMPLETED | UI tests, stability sessions, Director live test |
-| M1 CP 1.6 Stability and performance | COMPLETED | two 10-minute GUI sessions, benchmarks |
-| **M1 Computer Vision & Live Visualization** | **COMPLETED** (Director verified 2026-11-26) | [M1 report](docs/milestones/M1_COMPUTER_VISION.md), [Director verification](docs/milestones/M1_DIRECTOR_VERIFICATION.md) |
-| **Integration Audit 001** | **PASSED** | [audit](docs/audits/INTEGRATION_AUDIT_001.md) |
-| M2 Gesture Recognition Engine | IN_PROGRESS | Engineering Brief 002 |
-| M3 YouTube Shorts Integration | NOT_STARTED | Engineering Brief 002 |
+| M0 Project Foundation | COMPLETED | [M0 report](docs/milestones/M0_PROJECT_FOUNDATION.md) |
+| M1 Computer Vision & Live Visualization | COMPLETED (Director verified) | [M1 report](docs/milestones/M1_COMPUTER_VISION.md), [verification](docs/milestones/M1_DIRECTOR_VERIFICATION.md) |
+| Integration Audit 001 | PASSED | [audit](docs/audits/INTEGRATION_AUDIT_001.md) |
+| M2 Gesture Recognition Engine | IN_PROGRESS: technical verification passed, Director sign-off pending | [M2 report](docs/milestones/M2_GESTURE_RECOGNITION.md) |
+| M3 YouTube Shorts Integration | IN_PROGRESS: technical verification passed, Director live verification pending | [M3 report](docs/milestones/M3_YOUTUBE_INTEGRATION.md) |
+| Integration Audit 002 | Technical PASS; Director verification pending (not a full pass) | [audit](docs/audits/INTEGRATION_AUDIT_002.md) |
 | M4 - M6 | NOT_STARTED | [ROADMAP.md](ROADMAP.md) |
 
-### Director verification (M1)
+All M2 and M3 checkpoints are implemented and verified with automated, hardware, browser-fixture
+and (partly) live-website tests. What remains is human verification: performing the gestures in
+front of the webcam and controlling YouTube Shorts in the Director's own browser and account,
+following [M2_M3_DIRECTOR_CHECKLIST.md](docs/milestones/M2_M3_DIRECTOR_CHECKLIST.md).
 
-The Director launched the application, tested it with the physical webcam, provided a
-screenshot of successful live hand tracking (preview, skeleton, landmarks, bounding box,
-handedness and motion analysis) and reported that everything appears to work correctly.
-Individual checklist results were not reported; the reconciliation is in
-[M1_DIRECTOR_VERIFICATION.md](docs/milestones/M1_DIRECTOR_VERIFICATION.md). Residual gaps:
-busy-camera and disconnect paths not exercised on real hardware; two-hand tracking and
-handedness correctness not explicitly confirmed on the Director's own hands.
+### Director verification
 
-## Test results (2026-11-26, commit 09c8c5f)
+* M1: recorded in [M1_DIRECTOR_VERIFICATION.md](docs/milestones/M1_DIRECTOR_VERIFICATION.md).
+* M2/M3: the Director performed two guided calibration recordings (poses, swipes, sweeps,
+  natural movement) used to design and tune the recognizers. The live checklist has not been
+  performed yet.
+
+## Test results (2026-11-26)
 
 | Command | Result |
 |---|---|
-| `python -m ruff format --check src tests scripts` | 60 files already formatted |
-| `python -m ruff check src tests scripts` | All checks passed |
-| `python -m pytest` | 202 passed, 5 skipped (hardware tests, by design) |
-| `python -m pytest --hardware` | 207 passed, 0 skipped |
-| GitHub Actions CI (Windows, run 45752920939) | success (format, lint, model download, tests) |
+| `ruff format --check src tests scripts` / `ruff check ...` | clean |
+| `pytest --hardware` | 393 passed, 1 skipped (opt-in live website test) |
+| `pytest` (CI equivalent) | 388 passed, 6 skipped (5 webcam, 1 live website, by design) |
+| `pytest tests/live --live-youtube` | 1 full pass recorded; other runs affected by the automated browser (see M3 report) |
+| GitHub Actions (Windows, incl. browser tests with Edge) | success on 7ac48ef |
+| Gesture replay (`scripts/evaluate_gestures.py`, balanced) | pointing swipes 8/8, 0 false triggers in negative segments, sweeps 4/12 |
 
-## Performance (development machine)
+## Performance (Gesture test mode, 10 minutes, 1280x720)
 
-Windows 11, Intel Core i7-13700H, 15.6 GB RAM, built-in HP HD Camera, 1280x720.
-Details: [M1 report](docs/milestones/M1_COMPUTER_VISION.md).
-
-| Metric | Session 1 (before audit fixes D-1, D-5, D-9) | Session 2 (code of commit 833bd84) |
-|---|---|---|
-| Duration | 600.4 s | 600.7 s |
-| Capture / processing / display FPS (mean) | 30.2 / 30.3 / 30.3 | 30.2 / 30.3 / 30.3 |
-| Latency capture-to-result (mean / p99) | 15.5 / 21.9 ms | 16.2 / 23.3 ms |
-| Inference (mean) | 14.9 ms | 15.4 ms |
-| CPU (share of machine, mean) | 4.1 % | 4.9 % |
-| RSS first / last minute | 365 / 336 MB | 368 / 342 MB |
-| UI heartbeat lateness p99 / max | 14.3 / 222 ms | 12.5 / 39 ms |
-| Camera restarts | 4/4 | 4/4 |
-| Dropped frames | 5 | 9 |
-| Warnings/errors | none | none |
-
-Session 1 ran on the pre-commit working tree before audit fixes D-1, D-5 and D-9; session 2
-ran on the code of commit 833bd84, i.e. after all audit fixes except D-6 and D-8 (statistics
-reset after model load, label styling), which are covered by automated tests. Session 2 overlapped for about 10 s
-with a UI screenshot run.
+Capture / processing / display 30.9 / 29.8 / 29.8 FPS; latency 13.2 ms mean, 16.4 ms p99;
+inference 9.7 ms; gesture recognition 0.13 ms per frame with hands (replayed recordings);
+CPU 3.5 %; RSS 357 -> 362 MB (no growth); 4/4 camera restarts; no errors; shutdown 0.29 s.
+No hand was in view and other workloads ran concurrently (483 dropped frames, one 357 ms UI
+stall). Baseline comparison: [Integration Audit 002](docs/audits/INTEGRATION_AUDIT_002.md).
 
 ## Architecture decisions
 
-See [docs/architecture/DECISIONS.md](docs/architecture/DECISIONS.md): Python 3.12 venv
-(ADR-001), MediaPipe Tasks VIDEO mode (ADR-002), opencv-contrib 4.12 (ADR-003), two
-threads + latest-frame mailbox (ADR-004), Qt Widgets + QPainter overlay (ADR-005),
-framework-free core (ADR-006), pixel/palm-length motion units (ADR-007), Windows power
-throttling opt-out (ADR-008), model downloaded not committed (ADR-009), user-initiated
-camera scan (ADR-010).
+[DECISIONS.md](docs/architecture/DECISIONS.md): ADR-001 to ADR-010 (foundation and vision),
+ADR-011 extension + loopback bridge, ADR-012 rule-based gestures calibrated on recordings,
+ADR-013 finger swipe as moving pointing hand, ADR-014 safety-first dispatch, ADR-015 SQLite
+analytics. Details: [GESTURES.md](docs/architecture/GESTURES.md),
+[YOUTUBE_INTEGRATION.md](docs/architecture/YOUTUBE_INTEGRATION.md).
 
 ## Known issues and limitations
 
 | Severity | Issue |
 |---|---|
-| Low | Tested on one machine and one built-in camera; busy-camera and USB-disconnect paths tested only with simulated devices; two-hand tracking not explicitly confirmed by the Director. |
-| Low | One unexplained 222 ms UI stall in session 1 (none above 40 ms in session 2). |
-| Low | MediaPipe prints native log lines and a "NORM_RECT without IMAGE_DIMENSIONS" warning to the console from inside its graph. |
-| Low | First launch after a reboot can take several seconds to load the model (preview is live meanwhile). |
-| Low | Cameras listed by index, not by name; settings are not persisted between sessions. |
-| Info | Latency roughly doubles with `--allow-power-throttling` (Windows default behaviour). |
+| High (verification) | Physical gestures controlling the Director's real browser and account not yet verified |
+| Medium | YouTube markup changes would make actions fail (reported honestly as failed/unknown) |
+| Medium | Hand sweeps: low recall at the balanced preset; some face-touching movements look like sweeps (no action mapped yet) |
+| Low | Calibration from one person, one camera; an open hand held still 0.8 s is a stop gesture |
+| Low | Rare unexplained UI stalls (222 ms in M1, 357 ms under concurrent load) |
+| Low | CI actions use the deprecated Node.js 20 runtime (warning only) |
+| Low | MediaPipe native console warnings; first model load after reboot can take seconds |
 
-## Commits (M0, M1, Integration Audit 001)
+## Commits for Engineering Brief 002
 
 ```
-713af8b chore: initialize project foundation
-f05edbc feat(core): add high-resolution timing and latest-frame mailbox
-d6a88b1 feat(vision): implement webcam acquisition
-8daf536 feat(vision): integrate real-time hand landmark tracking
-2dd4aa7 feat(motion): implement timestamped movement analysis
-765c7e3 feat(core): add threaded vision pipeline and process diagnostics
-0ea6e0c feat(ui): add live computer vision dashboard
-63dfafd test: add regression tests for defects fixed during verification
-59269a0 test: add webcam hardware tests and performance measurement tools
-6c0b2f6 build: add Windows setup scripts and CI workflow
-6be0b61 test(visualization): cover letterbox and mirror coordinate mapping
-833bd84 build: normalize line endings with .gitattributes
-9580829 fix(pipeline): restart latency statistics when the tracker becomes ready
-09c8c5f fix(overlay): draw velocity labels on a background beyond the arrow head
+ce55224 docs: record director verification of vision milestone
+b732f66 docs: refine approved product roadmap
+e054f71 feat(gestures): analyze static hand poses from landmarks
+45d5b05 feat(gestures): add temporal swipe and static pose recognition
+d6753b7 build: add gesture recording and evaluation tools
+4e7c4d7 feat(actions): add control modes and safe action dispatcher
+ca5e9d4 feat(pipeline): run gesture recognition on the processing thread
+d6fbe2d feat(storage): persist user settings locally
+79b493f feat(browser): integrate YouTube Shorts through a companion extension
+7e5362a feat(analytics): persist gesture and action events locally
+f036902 feat(services): compose gesture control, browser bridge and analytics
+8ece71a feat(ui): display live gesture recognition and control state
+ca24ba4 fix(bridge): handle the expected socket error when the bridge stops
+c1cbec9 ci: report failed tests as workflow annotations
+cfd7ec3 test(browser): wait for extension APIs before configuring the worker
+7ac48ef test(browser): wait for the new Short before sending the next command
+b0bbaa8 fix: clean up failed settings writes and cap bridge connections
+2e49a5e test: measure gesture recognition in the stability session
 ```
 
-Followed by the documentation commit that adds this file.
+Followed by the documentation commit that adds this file. The shutdown fix itself landed in
+f036902; ca24ba4 contains its regression test.
 
 ## Recommended next steps
 
-Execute Engineering Brief 002 (M2 Gesture Recognition Engine, M3 YouTube Shorts Integration,
-Integration Audit 002).
+1. Director: complete [M2_M3_DIRECTOR_CHECKLIST.md](docs/milestones/M2_M3_DIRECTOR_CHECKLIST.md)
+   and report results; then M2 and M3 can be marked COMPLETED.
+2. Co-Director: M4 brief (Windows integration, Academic Comeback / Relapse). Sweeps are already
+   recognized and routed through the dispatcher; their recall should be revisited with more
+   recordings before they switch applications.

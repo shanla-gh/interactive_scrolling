@@ -102,3 +102,40 @@ Each record states the decision, the alternatives considered and the trade-offs.
 * **Why**: OpenCV cannot list device names, and Qt Multimedia returned no devices on the
   target machine. Probing opens each device briefly, which must be user-initiated for privacy.
 * **Trade-off**: entries are labelled "Camera N (WxH)" rather than with device names.
+
+## ADR-011 YouTube control through a companion extension and a loopback bridge
+
+* **Decision**: a minimal Manifest V3 extension performs actions in the Shorts page and
+  confirms them from page state; the app talks to it over a WebSocket on 127.0.0.1 that accepts
+  only the extension's fixed origin and a pairing code.
+* **Alternatives**: synthetic key presses (no context or outcome information, no reliable like
+  shortcut), browser remote debugging (far too much control), native messaging (extra host
+  executable and registry entries). Details: `YOUTUBE_INTEGRATION.md`.
+* **Trade-off**: one-time manual extension installation; dependency on YouTube's markup,
+  mitigated by honest failed/unknown outcomes.
+
+## ADR-012 Rule-based gestures calibrated on labeled recordings
+
+* **Decision**: transparent rules (pose flexion, distances and speeds in palm lengths, explicit
+  lifecycles) instead of a trained classifier; thresholds from recordings of real gestures.
+* **Why**: explainable rejection reasons, no confidence numbers that would be invented, easy
+  tuning through presets, and no training data beyond a few minutes of recordings.
+
+## ADR-013 Finger swipe = moving pointing hand, not a finger flick
+
+* **Evidence**: in the recordings a flick and its return (or its preparation) were the same
+  motion with the same speed and dwell, so no rule can tell an intended swipe from its return.
+  Moving the pointing hand, with a return window measured from the end of the movement,
+  recognized 8/8 intended swipes and no returns.
+
+## ADR-014 Safety-first action dispatch
+
+* **Decision**: start in Tracking only; explicit Live control; one action at a time; stale
+  events and events from an earlier mode generation are never executed; success only when
+  confirmed; system-wide emergency shortcut.
+
+## ADR-015 Minimal local analytics in SQLite
+
+* **Decision**: standard-library SQLite on a writer thread, one row per event category, local
+  day stored with each event; no browsing or camera data. Enough for the approved daily
+  statistics and future reports, without a reporting engine.

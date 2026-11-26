@@ -14,9 +14,9 @@ All camera processing stays on the user's computer.
 | **M0 - Project Foundation** | Repository, reproducible environment, architecture, testing and CI, documentation | Completed |
 | **M1 - Computer Vision & Live Visualization** | Webcam acquisition, hand tracking, skeleton overlay, motion engine, desktop UI, stability and performance | Completed (Director verified) |
 | **Integration Audit 001** | Whole-codebase audit after M0/M1 | Passed |
-| **M2 - Gesture Recognition Engine** | Finger swipes up/down, hand sweeps left/right, thumbs up, stop gesture; temporal state machine and false-positive prevention; configuration, presets and persistence; gesture visualization and history; safe activation (Tracking Only / Gesture Test / Live Control) | See [PROJECT_STATUS.md](PROJECT_STATUS.md) |
-| **M3 - YouTube Shorts Integration** | Browser integration, Shorts context validation, next/previous, like, play/pause, control UI, minimal local event logging and daily statistics | See [PROJECT_STATUS.md](PROJECT_STATUS.md) |
-| **Integration Audit 002** | Whole-codebase audit after M2/M3 | See [docs/audits](docs/audits) |
+| **M2 - Gesture Recognition Engine** | Finger swipes up/down, hand sweeps left/right, thumbs up, stop gesture; temporal state machine and false-positive prevention; configuration, presets and persistence; gesture visualization and history; safe activation (Tracking Only / Gesture Test / Live Control) | Technically verified; Director sign-off pending |
+| **M3 - YouTube Shorts Integration** | Browser integration, Shorts context validation, next/previous, like, play/pause, control UI, minimal local event logging and daily statistics | Technically verified; Director live verification pending |
+| **Integration Audit 002** | Whole-codebase audit after M2/M3 | Technical pass; Director verification pending |
 | **M4 - Windows Integration & Academic Comeback / Relapse** | Right-hand sweep switches to a designated study application, left-hand sweep returns to the designated social media application; context-aware execution | Not started |
 | **M5 - Desktop UX & Content Creator Mode** | Three application modes (below), tray operation, compact always-on-top overlay for OBS capture | Not started |
 | **M6 - Public Release** | Packaging, licensing compliance for bundled components, release documentation | Not started |
