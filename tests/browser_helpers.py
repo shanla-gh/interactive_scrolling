@@ -162,7 +162,14 @@ class Browser:
         while time.monotonic() < deadline:
             for target in self.targets():
                 if target["type"] == "service_worker" and EXTENSION_ID in target["url"]:
-                    return Session(target["webSocketDebuggerUrl"])
+                    session = Session(target["webSocketDebuggerUrl"])
+                    # The worker target can appear before its extension APIs are bound.
+                    session.wait_for(
+                        "typeof chrome !== 'undefined' && !!chrome.storage && "
+                        "typeof connect === 'function'",
+                        timeout=max(1.0, deadline - time.monotonic()),
+                    )
+                    return session
             time.sleep(0.2)
         raise TimeoutError("extension service worker not found")
 
