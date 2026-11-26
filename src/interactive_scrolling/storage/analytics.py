@@ -469,6 +469,23 @@ class AnalyticsStore:
 
         return self._read(query)  # type: ignore[return-value]
 
+    def counts_between(self, start_ts: float, end_ts: float) -> tuple[int, dict[str, int]] | None:
+        """(confirmed gestures, successful actions by name) between two wall-clock times."""
+
+        def query(connection: sqlite3.Connection) -> tuple[int, dict[str, int]]:
+            gestures = connection.execute(
+                "SELECT COUNT(*) FROM events WHERE kind = ? AND ts >= ? AND ts <= ?",
+                (EventKind.GESTURE_CONFIRMED.value, start_ts, end_ts),
+            ).fetchone()[0]
+            rows = connection.execute(
+                "SELECT action, COUNT(*) FROM events WHERE kind = ? AND outcome = 'succeeded' "
+                "AND ts >= ? AND ts <= ? GROUP BY action",
+                (EventKind.ACTION_RESULT.value, start_ts, end_ts),
+            ).fetchall()
+            return gestures, {a: n for a, n in rows}
+
+        return self._read(query)  # type: ignore[return-value]
+
     def dispatched_count(self, day: date | None = None) -> int | None:
         day = day or datetime.fromtimestamp(self._clock()).date()
 

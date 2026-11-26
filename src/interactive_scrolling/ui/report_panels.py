@@ -38,6 +38,8 @@ class DailyReportPanel(Card):
 
     pause_toggled = Signal(bool)
     settings_requested = Signal()
+    wrapped_requested = Signal(str)
+    """"today" or "session"."""
     clear_requested = Signal()
     enabled_changed = Signal(bool)
 
@@ -79,6 +81,10 @@ class DailyReportPanel(Card):
         self.pause_reason.setObjectName("rowKey")
         self.pause_reason.setWordWrap(True)
         self.add_widget(self.pause_reason)
+        for text, scope in (("Wrapped: today...", "today"), ("Wrapped: session...", "session")):
+            button = QPushButton(text)
+            button.clicked.connect(lambda _=False, s=scope: self.wrapped_requested.emit(s))
+            self.add_widget(button)
         limits = QPushButton("Limits and reminders...")
         limits.clicked.connect(self.settings_requested)
         self.add_widget(limits)

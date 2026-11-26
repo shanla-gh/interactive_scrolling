@@ -133,5 +133,9 @@ class ActivityTracker:
         return self._session_active_s + max(0.0, running)
 
     @property
+    def session_start(self) -> float | None:
+        return self._session_start
+
+    @property
     def in_session(self) -> bool:
         return self._session_start is not None

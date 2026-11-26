@@ -146,7 +146,7 @@ class ControlServices:
         with self._activity_lock:
             self.activity.update(now, active)
             session_s = self.activity.current_session_s(now)
-            session_start = self.activity._session_start
+            session_start = self.activity.session_start
         if now - self._eye_flushed >= 60.0:
             self._eye_flushed = now
             self.flush_eyes()
@@ -172,6 +172,11 @@ class ControlServices:
         self.report = daily_report(self.analytics, w.daily_budget_min, w.session_limit_min)
         self.performance = performance_report(self.analytics)
         self.eye_report = self.analytics.eye_report() if self.analytics.enabled else None
+
+    def current_session(self) -> tuple[float | None, float]:
+        """(start wall time, active seconds) of the scrolling session in progress."""
+        with self._activity_lock:
+            return self.activity.session_start, self.activity.current_session_s(self.wall_clock())
 
     def current_session_s(self) -> float:
         with self._activity_lock:

@@ -6,6 +6,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QShortcut
@@ -60,6 +61,12 @@ from interactive_scrolling.ui.report_panels import (
 from interactive_scrolling.ui.settings_dialog import GestureSettingsDialog
 from interactive_scrolling.ui.tray import TrayController
 from interactive_scrolling.ui.video_view import VideoView
+from interactive_scrolling.ui.wrapped import (
+    WrappedDialog,
+    render_wrapped,
+    wrapped_from_report,
+    wrapped_from_session,
+)
 from interactive_scrolling.ui.youtube_panel import YouTubePanel
 from interactive_scrolling.vision.camera import CameraInfo
 from interactive_scrolling.vision.compositing import MaskCompositor
@@ -224,6 +231,7 @@ class MainWindow(QMainWindow):
         self.today_panel.clear_requested.connect(self._clear_statistics)
         self.today_panel.pause_toggled.connect(self.services.pause_scrolling)
         self.today_panel.settings_requested.connect(self.open_wellbeing)
+        self.today_panel.wrapped_requested.connect(self.open_wrapped)
         self.services.notice_listeners.append(self._control_signals.notice.emit)
         self._control_signals.notice.connect(self._on_notice, queued)
         self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
@@ -716,6 +724,40 @@ class MainWindow(QMainWindow):
             )
             self.services.apply_effects(effects)
             log.info("Eye analytics calibrated (%d samples).", result.samples)
+
+    def wrapped_data(self, scope: str):  # type: ignore[no-untyped-def]
+        """Real statistics for Doomscroll Wrapped, or ``None`` if none are available."""
+        services = self.services
+        humorous = services.user_settings.wellbeing.humorous_labels
+        w = services.user_settings.wellbeing
+        services.refresh_reports()
+        if scope == "today":
+            report = services.report
+            return wrapped_from_report(report, humorous) if report is not None else None
+        start, session_s = services.current_session()
+        analytics = services.analytics
+        if start is None or analytics is None or not analytics.enabled:
+            return None
+        analytics.flush()
+        counts = analytics.counts_between(start, services.wall_clock())
+        if counts is None:
+            return None
+        return wrapped_from_session(
+            session_s, counts[0], counts[1], w.daily_budget_min, w.session_limit_min, humorous
+        )
+
+    def open_wrapped(self, scope: str = "today") -> None:
+        data = self.wrapped_data(scope)
+        if data is None:
+            log.warning(
+                "No %s statistics for Doomscroll Wrapped (statistics off or no scrolling "
+                "session in progress).",
+                "daily" if scope == "today" else "session",
+            )
+            return
+        image, _ = render_wrapped(data, self.services.user_settings.wellbeing.humorous_labels)
+        name = f"doomscroll-wrapped-{datetime.now():%Y-%m-%d-%H%M}.png"
+        WrappedDialog(image, name, self).exec()
 
     def open_wellbeing(self) -> None:
         dialog = WellbeingDialog(self.services.user_settings.wellbeing, self)
