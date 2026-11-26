@@ -1,0 +1,11 @@
+# Exact, tested development dependency set (runtime + test + lint tooling).
+# Install with: python -m pip install -r requirements-dev.txt
+-r requirements.txt
+colorama==0.4.6
+iniconfig==2.3.1
+pluggy==1.7.0
+Pygments==2.21.0
+pytest==9.0.3
+pytest-qt==4.5.0
+ruff==0.15.22
+typing_extensions==4.16.0
