@@ -14,7 +14,8 @@ class ResourceSample:
     cpu_percent_of_core: float
     """Process CPU time where one fully busy logical core = 100 % (may exceed 100 %)."""
     rss_mb: float
-    thread_count: int
+    thread_count: int | None
+    """Operating-system threads of the process, only when requested (see :meth:`sample`)."""
 
 
 class ResourceMonitor:
@@ -33,11 +34,18 @@ class ResourceMonitor:
     def logical_cores(self) -> int:
         return self._cores
 
-    def sample(self) -> ResourceSample:
+    def sample(self, include_threads: bool = False) -> ResourceSample:
+        """Measure the process. Cheap by default (well below 1 ms).
+
+        ``include_threads`` also counts the process's threads. On Windows psutil does this by
+        enumerating every process and thread of the whole system, which took ~13 ms per call on
+        the development machine and grows with system load, so the UI never requests it
+        (Integration Audit 003); benchmarks do.
+        """
         per_core = self._process.cpu_percent(None)
         with self._process.oneshot():
             rss = self._process.memory_info().rss
-            threads = self._process.num_threads()
+            threads = self._process.num_threads() if include_threads else None
         return ResourceSample(
             cpu_percent_of_machine=per_core / self._cores,
             cpu_percent_of_core=per_core,

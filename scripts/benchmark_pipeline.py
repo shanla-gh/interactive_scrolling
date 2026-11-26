@@ -115,7 +115,7 @@ def main() -> int:
     while time.perf_counter() - started < args.duration:
         time.sleep(1.0)
         m = pipeline.metrics()
-        r = monitor.sample()
+        r = monitor.sample(include_threads=True)
         samples.append(
             {
                 "t": round(time.perf_counter() - started, 1),
