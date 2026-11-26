@@ -8,7 +8,6 @@ account. ``tests/live/`` covers the real website (opt-in).
 from __future__ import annotations
 
 import socket
-import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -206,9 +205,9 @@ def test_extension_disconnect_makes_context_unavailable(stack) -> None:
     )
     assert wait_until(lambda: not bridge.clients(), timeout_s=5)
     assert controller.check(ActionType.NEXT_SHORT).reason == "browser extension not connected"
-    # A wrong pairing code is refused.
-    time.sleep(1.0)
+    # A wrong pairing code is refused. The extension retries after its close handler's delay
+    # or its 2 s heartbeat, whichever comes first, so wait for the attempt instead of sleeping.
+    assert wait_until(lambda: bridge.rejected_connections >= 1, timeout_s=8)
     assert not bridge.clients()
-    assert bridge.rejected_connections >= 1
     worker.eval(f"chrome.storage.local.set({{token: '{TOKEN}'}}).then(() => connect())")
     assert wait_until(lambda: len(bridge.clients()) == 1, timeout_s=20)
