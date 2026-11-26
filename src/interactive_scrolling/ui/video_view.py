@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-from interactive_scrolling.config.settings import OverlaySettings
+from interactive_scrolling.config.settings import AppearanceSettings, OverlaySettings
 from interactive_scrolling.core.pipeline import ProcessedFrame
 from interactive_scrolling.core.timing import RateMeter, now_ns
 from interactive_scrolling.ui.theme import mono_font
 from interactive_scrolling.visualization import palette
 from interactive_scrolling.visualization.geometry import ViewTransform
 from interactive_scrolling.visualization.overlay import OverlayRenderer
+
+
+def _no_section(name: str) -> AbstractContextManager[None]:
+    return contextlib.nullcontext()
 
 
 class VideoView(QWidget):
@@ -27,6 +35,9 @@ class VideoView(QWidget):
         self.overlay = overlay
         self.mirrored = True
         self.renderer = OverlayRenderer()
+        self.appearance = AppearanceSettings()
+        self.extra_painters: list[Callable[..., None]] = []
+        """Additional layers drawn over the frame (the clown effect)."""
         self.display_rate = RateMeter(1.0)
         self._frame: ProcessedFrame | None = None
         self._image: QImage | None = None
@@ -36,6 +47,8 @@ class VideoView(QWidget):
         self._banner_font = mono_font(15, bold=True)
         self._hud_font = mono_font(8.5, bold=True)
         self._placeholder_font = mono_font(10.5)
+        self.section: Callable[[str], AbstractContextManager[None]] = _no_section
+        """Timing hook for paint events (the window sets it to ``StallMonitor.section``)."""
 
     # ------------------------------------------------------------------ state
 
@@ -69,6 +82,11 @@ class VideoView(QWidget):
         self._banner = (text, color, now_ns())
         self.update()
 
+    def set_appearance(self, appearance: AppearanceSettings) -> None:
+        self.appearance = appearance
+        self.renderer.set_style(appearance)
+        self.update()
+
     def set_status_text(self, text: str) -> None:
         self._status_text = text
         self.update()
@@ -89,6 +107,10 @@ class VideoView(QWidget):
     # ------------------------------------------------------------------ painting
 
     def paintEvent(self, event: QPaintEvent) -> None:
+        with self.section("video paint"):
+            self._paint()
+
+    def _paint(self) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(palette.BACKGROUND))
         transform = self.current_transform()
@@ -96,11 +118,15 @@ class VideoView(QWidget):
             self._paint_placeholder(painter)
         else:
             self._paint_frame(painter, transform, self._image)
+            for paint_extra in self.extra_painters:
+                paint_extra(painter, transform, self._frame)
             self.renderer.paint(
                 painter, transform, self._frame.tracking, self._frame.motion, self.overlay
             )
-            self._paint_hud(painter, transform, self._frame)
-            self._paint_gesture_feedback(painter, transform, self._frame)
+            if self.appearance.show_telemetry:
+                self._paint_hud(painter, transform, self._frame)
+            if self.appearance.show_gesture_feedback:
+                self._paint_gesture_feedback(painter, transform, self._frame)
         painter.end()
 
     def _paint_frame(self, painter: QPainter, t: ViewTransform, image: QImage) -> None:

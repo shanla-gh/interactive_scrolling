@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPolygonF
 
-from interactive_scrolling.config.settings import OverlaySettings
+from interactive_scrolling.config.settings import AppearanceSettings, OverlaySettings
 from interactive_scrolling.core.timing import NS_PER_S
 from interactive_scrolling.motion.analyzer import HandMotion, MotionFrame, PointMotion, TrailPoint
 from interactive_scrolling.vision.landmarks import (
@@ -47,6 +47,12 @@ class OverlayRenderer:
         self._label_font.setStyleHint(QFont.StyleHint.Monospace)
         self._label_font.setPointSizeF(8.5)
         self._label_font.setBold(True)
+        self.style = AppearanceSettings()
+        """Colour and size customization (``auto`` colours hands by handedness)."""
+
+    def set_style(self, style: AppearanceSettings) -> None:
+        self.style = style
+        self.trail_duration_s = style.trail_length_s
 
     def paint(
         self,
@@ -74,16 +80,35 @@ class OverlayRenderer:
         options: OverlaySettings,
         timestamp_ns: int,
     ) -> None:
-        color = palette.hand_color(hand.handedness)
+        style = self.style
+        color = (
+            palette.hand_color(hand.handedness)
+            if style.skeleton_color == "auto"
+            else style.skeleton_color
+        )
         points = [
             QPointF(*transform.map_normalized(float(x), float(y))) for x, y, _ in hand.landmarks
         ]
 
         if motion is not None and options.show_palm_trail:
-            self._paint_trail(painter, transform, motion.palm_trail, color, timestamp_ns, 2.0, 110)
+            self._paint_trail(
+                painter,
+                transform,
+                motion.palm_trail,
+                color,
+                timestamp_ns,
+                2.0 * style.line_scale,
+                110,
+            )
         if motion is not None and options.show_fingertip_trail:
             self._paint_trail(
-                painter, transform, motion.fingertip_trail, color, timestamp_ns, 3.0, 220
+                painter,
+                transform,
+                motion.fingertip_trail,
+                color,
+                timestamp_ns,
+                3.0 * style.line_scale,
+                220,
             )
         if options.show_bounding_box:
             self._paint_bounding_box(painter, transform, hand, color)
@@ -102,23 +127,25 @@ class OverlayRenderer:
             )
 
     def _paint_skeleton(self, painter: QPainter, points: Sequence[QPointF], color: str) -> None:
-        glow = QPen(_color(color, 45), 6.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        core = QPen(_color(color, 230), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        k = self.style.line_scale
+        glow = QPen(_color(color, 45), 6.0 * k, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        core = QPen(_color(color, 230), 2.0 * k, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         for pen in (glow, core):
             painter.setPen(pen)
             for a, b in HAND_CONNECTIONS:
                 painter.drawLine(points[a], points[b])
 
     def _paint_landmarks(self, painter: QPainter, points: Sequence[QPointF], color: str) -> None:
+        k = self.style.landmark_scale
         painter.setPen(QPen(_color(palette.BACKGROUND, 220), 1.2))
         painter.setBrush(_color(color))
         for i, point in enumerate(points):
-            radius = 4.6 if i in FINGERTIPS else 3.2
+            radius = (4.6 if i in FINGERTIPS else 3.2) * k
             painter.drawEllipse(point, radius, radius)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(_color(color, 150), 1.2))
         for i in FINGERTIPS:
-            painter.drawEllipse(points[i], 8.0, 8.0)
+            painter.drawEllipse(points[i], 8.0 * k, 8.0 * k)
 
     def _hand_rect(self, transform: ViewTransform, hand: HandObservation) -> QRectF:
         x0, y0, x1, y1 = hand.bounding_box()

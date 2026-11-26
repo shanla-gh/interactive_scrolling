@@ -115,8 +115,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     from interactive_scrolling.ui.main_window import MainWindow
     from interactive_scrolling.ui.theme import apply_theme
     from interactive_scrolling.vision.camera import OpenCVCamera, probe_cameras
+    from interactive_scrolling.vision.face_tracker import MediaPipeFaceTracker
     from interactive_scrolling.vision.hand_tracker import MediaPipeHandTracker
-    from interactive_scrolling.vision.model_assets import default_model_path
+    from interactive_scrolling.vision.model_assets import (
+        FACE_MODEL,
+        SEGMENTER_MODEL,
+        default_model_path,
+    )
+    from interactive_scrolling.vision.segmenter import MediaPipePersonSegmenter
 
     model_path = settings.tracking.model_path or default_model_path()
     tracking_settings = settings.tracking
@@ -127,6 +133,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("interactive_scrolling")
     app.setApplicationVersion(__version__)
+    # The creator overlay and the tray icon are extra top-level objects; the application ends
+    # when the main window closes (which also stops the camera), never "when the last window
+    # closes" while the dashboard is merely hidden.
+    app.setQuitOnLastWindowClosed(False)
     apply_theme(app)
 
     from interactive_scrolling.services import build_services
@@ -139,6 +149,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         probe_cameras=partial(probe_cameras, 4, settings.camera.backend),
         services=services,
         register_hotkey=True,
+        segmenter_factory=lambda: MediaPipePersonSegmenter(SEGMENTER_MODEL.path()),
+        face_factory=lambda: MediaPipeFaceTracker(FACE_MODEL.path()),
+        quit_on_close=True,
     )
     window.show()
     if args.auto_start:

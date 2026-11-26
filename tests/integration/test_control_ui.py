@@ -200,8 +200,10 @@ def test_daily_statistics_reflect_real_events(qtbot, tmp_path) -> None:
     services.analytics.flush()
     window._stats_tick = 0
     window._update_control_status()
-    assert int(window.stats_panel.gestures.text()) >= 1
-    assert window.stats_panel.navigation.text().startswith("1")
+    window.services.refresh_reports()
+    window._update_control_status()
+    assert int(window.today_panel.gestures.text()) >= 1
+    assert window.today_panel.navigation.text().startswith("1")
 
 
 def test_youtube_panel_without_controller(qtbot, tmp_path) -> None:

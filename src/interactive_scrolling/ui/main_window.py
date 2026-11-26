@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QShortcut
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 from interactive_scrolling import __version__
 from interactive_scrolling.actions.types import ActionRecord, ActionStatus, ControlMode
 from interactive_scrolling.config.settings import SUPPORTED_RESOLUTIONS, AppSettings, CameraSettings
+from interactive_scrolling.core.auxiliary import AuxiliaryWorker
 from interactive_scrolling.core.diagnostics import ResourceMonitor
 from interactive_scrolling.core.pipeline import (
     CameraFactory,
@@ -35,22 +37,43 @@ from interactive_scrolling.core.pipeline import (
     TrackerState,
     VisionPipeline,
 )
+from interactive_scrolling.core.stall_monitor import Stall, StallMonitor
 from interactive_scrolling.gestures.types import GestureEvent
 from interactive_scrolling.services import ControlServices, offline_services
+from interactive_scrolling.ui.appearance_dialog import AppearanceDialog
 from interactive_scrolling.ui.bridge import PipelineBridge, QtLogHandler
 from interactive_scrolling.ui.control_bar import ControlBar
+from interactive_scrolling.ui.creator_overlay import CreatorOverlay
+from interactive_scrolling.ui.effects_panel import (
+    CalibrationDialog,
+    EffectsDialog,
+    VisualBehaviorPanel,
+)
 from interactive_scrolling.ui.gesture_panels import GestureHistory, GesturePanel
 from interactive_scrolling.ui.hotkey import GlobalHotkey
 from interactive_scrolling.ui.panels import MotionPanel, OverlayPanel, TrackingPanel
+from interactive_scrolling.ui.report_panels import (
+    DailyReportPanel,
+    PerformancePanel,
+    WellbeingDialog,
+)
 from interactive_scrolling.ui.settings_dialog import GestureSettingsDialog
+from interactive_scrolling.ui.tray import TrayController
 from interactive_scrolling.ui.video_view import VideoView
-from interactive_scrolling.ui.youtube_panel import StatsPanel, YouTubePanel
+from interactive_scrolling.ui.youtube_panel import YouTubePanel
 from interactive_scrolling.vision.camera import CameraInfo
+from interactive_scrolling.vision.compositing import MaskCompositor
 from interactive_scrolling.visualization import palette
+from interactive_scrolling.visualization.clown import ClownEffect, clown_stage
 
 log = logging.getLogger(__name__)
 
 ProbeFunction = Callable[[], list[CameraInfo]]
+SegmenterFactory = Callable[[], object]
+
+UI_MODES = ("developer", "creator", "background")
+"""Presentation modes. They are independent of the control (safety) modes and never touch the
+camera, the models or the dispatcher: one runtime, several views."""
 
 _LOG_COLORS = {
     logging.WARNING: palette.ACCENT_AMBER,
@@ -68,6 +91,7 @@ class _ControlSignals(QObject):
 
     record = Signal(object)
     mode = Signal(object, object, str)
+    notice = Signal(object)
 
 
 class MainWindow(QMainWindow):
@@ -80,8 +104,13 @@ class MainWindow(QMainWindow):
         resource_monitor: ResourceMonitor | None = None,
         services: ControlServices | None = None,
         register_hotkey: bool = False,
+        segmenter_factory: SegmenterFactory | None = None,
+        face_factory: SegmenterFactory | None = None,
+        quit_on_close: bool = False,
     ) -> None:
         super().__init__()
+        self._quit_on_close = quit_on_close
+        self.ui_mode = "developer"
         self.settings = settings
         self.services = services or offline_services(settings.gestures)
         self._probe_cameras = probe_cameras
@@ -95,6 +124,9 @@ class MainWindow(QMainWindow):
         self.resize(1360, 860)
         self.setMinimumSize(980, 640)
 
+        # UI responsiveness instrumentation (Integration Audit 003): a watchdog thread
+        # attributes every UI stall to the running handler, GC and worker progress.
+        self.stall_monitor = StallMonitor(on_stall=self._report_stall)
         self.bridge = PipelineBridge(self)
         self.pipeline = VisionPipeline(
             listener=self.bridge,
@@ -104,9 +136,44 @@ class MainWindow(QMainWindow):
             inference_max_width=settings.tracking.inference_max_width,
             gesture_engine=self.services.engine,
             on_gesture_event=self._on_gesture_event,
+            progress=self.stall_monitor.worker_progress,
         )
 
         self.video = VideoView(settings.overlay)
+        self.video.section = self.stall_monitor.section
+        user_settings = self.services.user_settings
+        self.video.set_appearance(user_settings.appearance)
+        # Optional person segmentation for the creator overlay. It receives frames only after
+        # hand tracking (read-only) and runs only while the transparent overlay is visible.
+        self.segmenter: AuxiliaryWorker | None = None
+        if segmenter_factory is not None:
+            self.segmenter = AuxiliaryWorker("segmentation", segmenter_factory, max_fps=15.0)
+            self.pipeline.add_frame_tap(self.segmenter.submit)
+        # Optional face landmarks, shared by the clown effect and eye analytics. The worker
+        # runs only while one of the two features is enabled.
+        self.face_worker: AuxiliaryWorker | None = None
+        if face_factory is not None:
+            self.face_worker = AuxiliaryWorker(
+                "face landmarks",
+                face_factory,
+                max_fps=15.0,
+                on_result=lambda r: self.services.add_face(r.timestamp_ns / 1e9, r.value),
+            )
+            self.pipeline.add_frame_tap(self.face_worker.submit)
+        self.clown = ClownEffect()
+        self.creator = CreatorOverlay(
+            user_settings.creator, user_settings.appearance, self.segmenter
+        )
+        self.creator.mirrored = settings.mirror_preview
+        self.creator.developer_requested.connect(lambda: self.set_ui_mode("developer"))
+        self.creator.background_requested.connect(lambda: self.set_ui_mode("background"))
+        self.creator.quit_requested.connect(self.close)
+        self.creator.settings_changed.connect(
+            lambda value: self.services.update_settings(creator=value)
+        )
+        self.video.extra_painters.append(self._paint_clown)
+        self.creator.extra_painters.append(self._paint_clown)
+        self._update_face_worker()
         self.video.set_mirrored(settings.mirror_preview)
         self.video.renderer.trail_duration_s = settings.motion.trail_duration_s
         self.tracking_panel = TrackingPanel()
@@ -117,7 +184,14 @@ class MainWindow(QMainWindow):
         self.history = GestureHistory()
         user = self.services.user_settings
         self.youtube_panel = YouTubePanel(user.pairing_token, user.bridge_port)
-        self.stats_panel = StatsPanel(user.analytics_enabled)
+        self.today_panel = DailyReportPanel(user.analytics_enabled)
+        self.performance_panel = PerformancePanel()
+        self.visual_panel = VisualBehaviorPanel()
+        self.visual_panel.calibrate_requested.connect(self.calibrate_eyes)
+        self.visual_panel.settings_requested.connect(self.open_effects)
+        self.appearance_button = QPushButton("Appearance...")
+        self.appearance_button.setToolTip("Skeleton colour, sizes, trails, overlay position")
+        self.appearance_button.clicked.connect(self.open_appearance)
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -146,14 +220,25 @@ class MainWindow(QMainWindow):
         self.control_bar.mode_requested.connect(self.set_control_mode)
         self.control_bar.disable_requested.connect(self.emergency_disable)
         self.gesture_panel.settings_requested.connect(self.open_gesture_settings)
-        self.stats_panel.enabled_changed.connect(self.services.set_analytics_enabled)
-        self.stats_panel.clear_requested.connect(self._clear_statistics)
+        self.today_panel.enabled_changed.connect(self.services.set_analytics_enabled)
+        self.today_panel.clear_requested.connect(self._clear_statistics)
+        self.today_panel.pause_toggled.connect(self.services.pause_scrolling)
+        self.today_panel.settings_requested.connect(self.open_wellbeing)
+        self.services.notice_listeners.append(self._control_signals.notice.emit)
+        self._control_signals.notice.connect(self._on_notice, queued)
         self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
         self.escape_shortcut.activated.connect(self.emergency_disable)
         self.hotkey = GlobalHotkey(self.emergency_disable)
         if register_hotkey and self.hotkey.register():
             QCoreApplication.instance().installNativeEventFilter(self.hotkey)
         self.control_bar.set_hotkey_hint(self.hotkey.label)
+        self.tray = TrayController(self.hotkey.label, self)
+        self.tray.start_camera.connect(self.start_camera)
+        self.tray.stop_camera.connect(self.stop_camera)
+        self.tray.disable_control.connect(self.emergency_disable)
+        self.tray.mode_requested.connect(self.set_ui_mode)
+        self.tray.quit_requested.connect(self.close)
+        self.tray.show()
 
         self.log_handler = QtLogHandler()
         self.log_handler.emitter.record.connect(self._append_log)
@@ -179,6 +264,14 @@ class MainWindow(QMainWindow):
         self._stats_tick = 0
         self._update_control_status()
 
+        self.heartbeat_timer = QTimer(self)
+        self.heartbeat_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.heartbeat_timer.setInterval(50)
+        self.heartbeat_timer.timeout.connect(self.stall_monitor.beat)
+        self.heartbeat_timer.start()
+        self.stall_monitor.start()
+
+        self.services.start_activity()
         self._apply_camera_state(CameraState.STOPPED)
         log.info("interactive_scrolling %s started. All processing runs locally.", __version__)
         self.pipeline.launch()
@@ -239,6 +332,19 @@ class MainWindow(QMainWindow):
             self.resolution_combo.setCurrentIndex(SUPPORTED_RESOLUTIONS.index(current))
         layout.addWidget(self.resolution_combo)
 
+        self.creator_button = QPushButton("Creator overlay")
+        self.creator_button.setToolTip(
+            "Compact always-on-top camera overlay for streaming and recording (OBS)"
+        )
+        self.creator_button.clicked.connect(lambda: self.set_ui_mode("creator"))
+        layout.addWidget(self.creator_button)
+        self.tray_button = QPushButton("To tray")
+        self.tray_button.setToolTip(
+            "Hide the windows; the tray icon keeps showing camera and control status"
+        )
+        self.tray_button.clicked.connect(lambda: self.set_ui_mode("background"))
+        layout.addWidget(self.tray_button)
+
         self.start_button = QPushButton("Start camera")
         self.start_button.setObjectName("primaryButton")
         self.start_button.setMinimumWidth(130)
@@ -261,9 +367,10 @@ class MainWindow(QMainWindow):
         self.side_tabs.setFixedWidth(360)
         for title, panels in (
             ("Gestures", [self.gesture_panel]),
-            ("YouTube", [self.youtube_panel, self.stats_panel]),
-            ("Tracking", [self.tracking_panel, self.motion_panel]),
-            ("View", [self.overlay_panel]),
+            ("Today", [self.today_panel, self.visual_panel]),
+            ("Browser", [self.youtube_panel]),
+            ("Performance", [self.performance_panel, self.tracking_panel, self.motion_panel]),
+            ("View", [self.overlay_panel, self.appearance_button]),
         ):
             self.side_tabs.addTab(self._scroll_page(panels), title)
         top_layout.addWidget(self.side_tabs)
@@ -329,6 +436,7 @@ class MainWindow(QMainWindow):
         self.latency_label = QLabel()
         self.dropped_label = QLabel()
         self.resources_label = QLabel()
+        self.stalls_label = QLabel()
         for label, tip in (
             (self.capture_fps_label, "Frames per second delivered by the camera"),
             (self.processing_fps_label, "Frames per second through inference and motion analysis"),
@@ -336,6 +444,11 @@ class MainWindow(QMainWindow):
             (self.latency_label, "Capture-to-result processing latency: mean / 95th percentile"),
             (self.dropped_label, "Outdated frames skipped so latency cannot accumulate"),
             (self.resources_label, "Process CPU (share of all logical cores) and resident memory"),
+            (
+                self.stalls_label,
+                f"Times the window did not respond for more than "
+                f"{self.stall_monitor.threshold_ms:.0f} ms (measured by a watchdog thread)",
+            ),
         ):
             label.setToolTip(tip)
             layout.addWidget(label)
@@ -376,9 +489,11 @@ class MainWindow(QMainWindow):
         if state is CameraState.ERROR:
             log.error(message)
             self.video.clear(f"Camera error\n\n{message}")
+            self.creator.clear()
         elif state is CameraState.STOPPED:
             log.info(message)
             self.video.clear("Camera is off. Press Start camera to begin.")
+            self.creator.clear()
         elif state is CameraState.STARTING:
             log.info(message)
             self.video.clear(message)
@@ -399,6 +514,9 @@ class MainWindow(QMainWindow):
         )
         self.status_pill.setProperty("state", state.value)
         self.start_button.setText("Stop camera" if running else "Start camera")
+        self.tray.update_state(
+            state in (CameraState.RUNNING, CameraState.STARTING), self.services.dispatcher.mode
+        )
         self.start_button.setProperty("running", running)
         self.start_button.setEnabled(state is not CameraState.STOPPING)
         idle = state in (CameraState.STOPPED, CameraState.ERROR)
@@ -425,13 +543,20 @@ class MainWindow(QMainWindow):
                 log.info(message)
 
     def _on_frame_ready(self) -> None:
+        with self.stall_monitor.section("frame update"):
+            self._show_frame()
+
+    def _show_frame(self) -> None:
         frame = self.bridge.take_latest()
         if frame is None:
             return
         # Discard frames from a stopped session so no stale image or landmarks remain.
         if frame.session != self._session or self._camera_state is not CameraState.RUNNING:
             return
+        self._update_clown(frame)
         self.video.set_frame(frame)
+        if self.creator.isVisible():
+            self.creator.show_frame(frame)
         self.tracking_panel.update_tracking(frame.tracking)
         self.motion_panel.update_motion(frame, self.video.mirrored)
         enabled = self.services.dispatcher.mode is not ControlMode.TRACKING_ONLY
@@ -440,6 +565,7 @@ class MainWindow(QMainWindow):
     def _on_mirror_changed(self, mirrored: bool) -> None:
         self.settings.mirror_preview = mirrored
         self.video.set_mirrored(mirrored)
+        self.creator.mirrored = mirrored
         if self.video.frame is not None:
             self.motion_panel.update_motion(self.video.frame, mirrored)
 
@@ -458,10 +584,16 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, old: ControlMode, new: ControlMode, reason: str) -> None:
         self.pipeline.set_gestures_enabled(new is not ControlMode.TRACKING_ONLY)
         self.control_bar.set_mode(new)
+        self.tray.update_state(
+            self._camera_state in (CameraState.RUNNING, CameraState.STARTING), new
+        )
         if new is ControlMode.TRACKING_ONLY:
             self.gesture_panel.show_frame(None, enabled=False)
         if new is ControlMode.LIVE_CONTROL:
-            log.warning("LIVE CONTROL enabled: confirmed gestures will control YouTube Shorts.")
+            log.warning(
+                "LIVE CONTROL enabled: confirmed gestures will control YouTube Shorts "
+                "and browser tabs."
+            )
 
     def _on_gesture_event(self, event: GestureEvent) -> None:
         # Called on the processing thread; submitting never blocks.
@@ -471,6 +603,7 @@ class MainWindow(QMainWindow):
         first = self.history.outcome_of(record.record_id) is None
         self.history.update_record(record)
         self.gesture_panel.show_record(record)
+        self.creator.show_record(record)
         if first:
             self.video.show_gesture(record.event.gesture.label)
         if record.status.final or record.status is ActionStatus.DISPATCHED:
@@ -486,6 +619,126 @@ class MainWindow(QMainWindow):
                     f" ({record.reason})" if record.reason else "",
                 )
 
+    # ------------------------------------------------------------------ presentation modes
+
+    def set_ui_mode(self, mode: str) -> None:
+        """Developer (dashboard), creator (floating overlay) or background (tray only).
+
+        Only windows are shown or hidden: the camera, models, gesture engine, dispatcher, browser
+        bridge and statistics keep running unchanged, and the emergency shortcut stays active.
+        """
+        if mode not in UI_MODES:
+            raise ValueError(f"unknown UI mode {mode!r}")
+        if mode == "background" and not self.tray.available:
+            log.warning("No system tray available; staying in the current mode.")
+            return
+        self.ui_mode = mode
+        if mode == "developer":
+            self.creator.hide()
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+        elif mode == "creator":
+            self.creator.apply_settings(self.creator.settings, reposition=True)
+            self.creator.show()
+            self.hide()
+        else:
+            self.creator.hide()
+            self.hide()
+            self.tray.notify(
+                "Interactive Scrolling is running in the background",
+                "The tray icon shows the camera and control state. Right-click it for options.",
+            )
+        log.info("Presentation mode: %s", mode)
+
+    # ------------------------------------------------------------------ face features
+
+    def _update_face_worker(self) -> None:
+        effects = self.services.user_settings.effects
+        if self.face_worker is not None:
+            self.face_worker.set_enabled(effects.clown_enabled or effects.eye_analytics_enabled)
+        if not effects.clown_enabled:
+            self.clown.reset()
+
+    def clown_stage(self) -> int:
+        effects = self.services.user_settings.effects
+        if effects.clown_preview_stage is not None:
+            return effects.clown_preview_stage
+        return clown_stage(self.services.current_session_s(), effects.clown_thresholds)
+
+    def _update_clown(self, frame) -> None:  # type: ignore[no-untyped-def]
+        if not self.services.user_settings.effects.clown_enabled or self.face_worker is None:
+            return
+        result = self.face_worker.latest()
+        face = None
+        if result is not None and MaskCompositor.usable(
+            result.timestamp_ns, result.session, frame.capture_ns, frame.session
+        ):
+            face = result.value
+        self.clown.update(
+            face.landmarks if face is not None else None, frame.capture_ns, self.clown_stage()
+        )
+
+    def _paint_clown(self, painter, transform, frame) -> None:  # type: ignore[no-untyped-def]
+        if self.services.user_settings.effects.clown_enabled:
+            self.clown.paint(painter, transform)
+
+    def open_effects(self) -> None:
+        dialog = EffectsDialog(self.services.user_settings.effects, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.services.apply_effects(dialog.result_settings())
+            self._update_face_worker()
+            log.info("Face effect settings saved.")
+
+    def calibrate_eyes(self) -> None:
+        if self.face_worker is None:
+            log.warning("Face landmarks are not available in this build.")
+            return
+        worker = self.face_worker
+        was_enabled = worker.enabled
+        worker.set_enabled(True)
+
+        def latest():  # type: ignore[no-untyped-def]
+            result = worker.latest()
+            return result.value if result is not None else None
+
+        dialog = CalibrationDialog(latest, self)
+        dialog.exec()
+        worker.set_enabled(was_enabled)
+        self._update_face_worker()
+        result = dialog.result
+        if result is not None and result.reliable:
+            effects = replace(
+                self.services.user_settings.effects,
+                eye_baseline_yaw=round(result.baseline.yaw, 2),
+                eye_baseline_pitch=round(result.baseline.pitch, 2),
+                eye_baseline_gaze=round(result.baseline.gaze, 4),
+            )
+            self.services.apply_effects(effects)
+            log.info("Eye analytics calibrated (%d samples).", result.samples)
+
+    def open_wellbeing(self) -> None:
+        dialog = WellbeingDialog(self.services.user_settings.wellbeing, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.services.apply_wellbeing(dialog.result_settings())
+            log.info("Limits and reminders saved.")
+
+    def _on_notice(self, notice) -> None:  # type: ignore[no-untyped-def]
+        self.video.show_gesture(notice.title.upper(), palette.ACCENT_AMBER)
+        self.tray.notify(notice.title, notice.text)
+
+    def open_appearance(self) -> None:
+        user = self.services.user_settings
+        dialog = AppearanceDialog(user.appearance, self.creator.settings, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            appearance = dialog.result_appearance()
+            creator = dialog.result_creator()
+            self.video.set_appearance(appearance)
+            self.creator.set_appearance(appearance)
+            self.creator.apply_settings(creator, reposition=True)
+            self.services.update_settings(appearance=appearance, creator=creator)
+            log.info("Appearance saved.")
+
     def open_gesture_settings(self) -> None:
         dialog = GestureSettingsDialog(
             self.services.engine.settings, self.services.dispatcher.mapping, self
@@ -498,11 +751,16 @@ class MainWindow(QMainWindow):
     def _clear_statistics(self) -> None:
         analytics = self.services.analytics
         if analytics is not None and analytics.clear():
-            log.info("Local statistics cleared.")
+            log.info("Local statistics deleted.")
+        self.services.refresh_reports()
         self._stats_tick = 0
         self._update_control_status()
 
     def _update_control_status(self) -> None:
+        with self.stall_monitor.section("control status"):
+            self._refresh_control_status()
+
+    def _refresh_control_status(self) -> None:
         controller = self.services.controller
         status = controller.status() if controller is not None else None
         self.youtube_panel.show_status(status)
@@ -512,9 +770,25 @@ class MainWindow(QMainWindow):
             self.control_bar.set_youtube(f"YouTube: ready ({status.target_browser})", True)
         else:
             self.control_bar.set_youtube(f"YouTube: {status.reason}", False)
-        analytics = self.services.analytics
-        if analytics is not None and self._stats_tick % 4 == 0:
-            self.stats_panel.show_stats(analytics.daily_stats(), analytics.error)
+        # Reports are computed on the services' activity thread; the UI only displays them.
+        services = self.services
+        analytics = services.analytics
+        self.today_panel.show_report(
+            services.report,
+            services.current_session_s(),
+            services.user_settings.wellbeing.humorous_labels,
+            analytics.error if analytics is not None else "statistics are off in this session",
+        )
+        self.today_panel.show_pause(
+            services.wellbeing.scrolling_paused, services.wellbeing.pause_reason
+        )
+        self.performance_panel.show_report(services.performance)
+        effects = services.user_settings.effects
+        self.visual_panel.show_report(
+            effects.eye_analytics_enabled,
+            effects.eye_baseline_yaw is not None,
+            services.eye_report,
+        )
         self._stats_tick += 1
 
     # ------------------------------------------------------------------ camera scan
@@ -555,6 +829,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ diagnostics
 
     def _update_diagnostics(self) -> None:
+        with self.stall_monitor.section("diagnostics"):
+            self._refresh_diagnostics()
+
+    def _refresh_diagnostics(self) -> None:
         m = self.pipeline.metrics()
         self._tick += 1
 
@@ -573,12 +851,23 @@ class MainWindow(QMainWindow):
         else:
             self.latency_label.setText("LATENCY —")
         self.dropped_label.setText(f"DROPPED {m.frames_dropped}")
+        stalls = self.stall_monitor
+        self.stalls_label.setText(
+            f"UI STALLS {stalls.stall_count}"
+            + (f" (max {stalls.max_stall_ms:.0f} ms)" if stalls.stall_count else "")
+        )
         if self._tick % 4 == 1:
             sample = self._resources.sample()
             self._last_resource_text = (
                 f"CPU {sample.cpu_percent_of_machine:4.1f}%  RAM {sample.rss_mb:.0f} MB"
             )
         self.resources_label.setText(self._last_resource_text)
+        self.performance_panel.show_live(m, self.pipeline.gesture_ms_mean if live else None)
+
+    def _report_stall(self, stall: Stall) -> None:
+        # Called on the watchdog thread; logging is thread safe and reaches the UI queued.
+        level = logging.WARNING if stall.duration_ms >= 250 else logging.DEBUG
+        log.log(level, "%s", stall.summary())
 
     def _append_log(self, text: str, level: int) -> None:
         color = QColor(_LOG_COLORS.get(level, palette.TEXT_MUTED)).name()
@@ -588,14 +877,25 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.services.dispatcher.emergency_disable()
+        self.creator.close()
+        self.tray.hide()
+        if self.segmenter is not None:
+            self.segmenter.shutdown()
+        if self.face_worker is not None:
+            self.face_worker.shutdown()
         self.hotkey.unregister()
         self.status_timer.stop()
         self.diagnostics_timer.stop()
+        self.heartbeat_timer.stop()
+        self.stall_monitor.stop()
         logging.getLogger("interactive_scrolling").removeHandler(self.log_handler)
         if not self.pipeline.shutdown(timeout_s=5.0):
             log.error("Pipeline did not shut down cleanly.")
         self.services.shutdown()
         event.accept()
+        if self._quit_on_close:
+            # The overlay and tray must not keep a process alive without its pipeline.
+            QCoreApplication.quit()
 
 
 def _escape(text: str) -> str:

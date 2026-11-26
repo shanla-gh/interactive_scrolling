@@ -9,8 +9,8 @@ from interactive_scrolling.actions.types import ControlMode
 
 MODE_TIPS = {
     ControlMode.TRACKING_ONLY: "Camera and hand tracking only. Gestures are not recognized.",
-    ControlMode.GESTURE_TEST: "Gestures are recognized and shown. Nothing is sent to YouTube.",
-    ControlMode.LIVE_CONTROL: "Confirmed gestures control YouTube Shorts in your browser.",
+    ControlMode.GESTURE_TEST: "Gestures are recognized and shown. Nothing is sent to the browser.",
+    ControlMode.LIVE_CONTROL: "Confirmed gestures control YouTube Shorts and browser tabs.",
 }
 
 
