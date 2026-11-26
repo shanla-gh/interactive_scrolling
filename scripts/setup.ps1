@@ -1,5 +1,5 @@
 # Creates the project-local virtual environment, installs the pinned dependencies and
-# downloads the hand landmarker model. Run from the repository root:
+# downloads the MediaPipe models (hands; optional segmentation and face). Run from the root:
 #     powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)

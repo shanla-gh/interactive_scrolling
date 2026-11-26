@@ -52,6 +52,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="keep Windows' default power throttling (lower power use, slower tracking)",
     )
     parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="check models, inference and data folders without opening the camera, then exit",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -94,9 +99,68 @@ def configure_logging(level: str) -> None:
     os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
 
 
+def self_test() -> int:
+    """Installation check for packaged builds: no camera, no network, no window."""
+    import json
+    import tempfile
+    import time
+
+    import numpy as np
+
+    from interactive_scrolling.storage.analytics import AnalyticsStore
+    from interactive_scrolling.storage.paths import data_dir
+    from interactive_scrolling.storage.settings_store import SettingsStore
+    from interactive_scrolling.vision.face_tracker import MediaPipeFaceTracker
+    from interactive_scrolling.vision.hand_tracker import MediaPipeHandTracker
+    from interactive_scrolling.vision.model_assets import MODELS, verify_model
+    from interactive_scrolling.vision.segmenter import MediaPipePersonSegmenter
+
+    results: dict[str, object] = {"version": __version__}
+    ok = True
+    for model in MODELS:
+        valid = verify_model(model.path(), model.sha256)
+        results[f"model_{model.key}"] = (
+            "verified" if valid else f"missing or invalid: {model.path()}"
+        )
+        ok &= valid or not model.required
+    image = np.zeros((360, 640, 3), dtype=np.uint8)
+    for name, factory in (
+        ("hand_inference", lambda: MediaPipeHandTracker(TrackingSettings(), MODELS[0].path())),
+        ("segmentation_inference", lambda: MediaPipePersonSegmenter(MODELS[1].path())),
+        ("face_inference", lambda: MediaPipeFaceTracker(MODELS[2].path())),
+    ):
+        try:
+            started = time.perf_counter()
+            processor = factory()
+            processor.process(image, 0)
+            processor.close()
+            results[name] = f"ok ({(time.perf_counter() - started) * 1000:.0f} ms incl. load)"
+        except Exception as exc:  # reported, not raised: this is a diagnostic
+            results[name] = f"failed: {exc}"
+            ok &= name != "hand_inference"
+    folder = data_dir()
+    store = SettingsStore(folder / "settings.json")
+    store.load()
+    results["settings"] = str(store.path) if store.path.is_file() else "not writable"
+    with tempfile.TemporaryDirectory() as tmp:
+        analytics = AnalyticsStore(Path(tmp) / "check.sqlite3")
+        results["statistics_database"] = "ok" if analytics.error is None else analytics.error
+        analytics.close()
+    results["result"] = "PASS" if ok else "FAIL"
+    text = json.dumps(results, indent=2)
+    # A windowed (packaged) build has no console: the report is also written next to the
+    # settings so the result can be read after running the executable.
+    (folder / "self-test.json").write_text(text, encoding="utf-8")
+    if sys.stdout is not None:
+        print(text)
+    return 0 if ok else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
+    if args.self_test:
+        return self_test()
     try:
         settings = build_settings(args)
     except ConfigError as exc:

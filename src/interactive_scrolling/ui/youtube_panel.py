@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Signal
@@ -12,7 +13,12 @@ from interactive_scrolling.integrations.youtube.controller import YouTubeStatus
 from interactive_scrolling.storage.analytics import DailyStats
 from interactive_scrolling.ui.panels import NO_DATA, Card
 
-EXTENSION_DIR = Path(__file__).resolve().parents[3] / "browser_extension"
+EXTENSION_DIR = (
+    Path(getattr(sys, "_MEIPASS", "")) / "browser_extension"
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parents[3] / "browser_extension"
+)
+"""The unpacked extension: next to the source tree, or inside a packaged build."""
 
 
 def _bool(value: bool | None, yes: str, no: str) -> str:
