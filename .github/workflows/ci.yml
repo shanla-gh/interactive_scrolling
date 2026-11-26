@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint and hardware-independent tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install --no-deps -e .
+
+      - name: Format check
+        run: python -m ruff format --check src tests scripts
+
+      - name: Lint
+        run: python -m ruff check src tests scripts
+
+      - name: Cache hand landmarker model
+        uses: actions/cache@v4
+        with:
+          path: models/hand_landmarker.task
+          key: hand-landmarker-fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1
+
+      - name: Download and verify model
+        run: python scripts/download_model.py
+
+      # Tests marked "hardware" need a physical webcam and are skipped here by design.
+      # CI does not and cannot validate real webcam behaviour.
+      - name: Tests
+        run: python -m pytest -ra
