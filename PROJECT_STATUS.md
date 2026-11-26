@@ -5,7 +5,7 @@ Source of truth for the current state of the project. Update it with every check
 | | |
 |---|---|
 | Version | 0.2.0.dev0 (development build, not released) |
-| Active work | M2 + M3 awaiting Director verification; next: M4 (requires a new brief) |
+| Active work | Engineering Brief 003 (M4-M11, audits 003-005) in progress; M2/M3 Director verification pending |
 | Last updated | 2026-11-26 |
 
 ## Milestones
@@ -18,7 +18,7 @@ Source of truth for the current state of the project. Update it with every check
 | M2 Gesture Recognition Engine | IN_PROGRESS: technical verification passed, Director sign-off pending | [M2 report](docs/milestones/M2_GESTURE_RECOGNITION.md) |
 | M3 YouTube Shorts Integration | IN_PROGRESS: technical verification passed, Director live verification pending | [M3 report](docs/milestones/M3_YOUTUBE_INTEGRATION.md) |
 | Integration Audit 002 | Technical PASS; Director verification pending (not a full pass) | [audit](docs/audits/INTEGRATION_AUDIT_002.md) |
-| M4 - M6 | NOT_STARTED | [ROADMAP.md](ROADMAP.md) |
+| M4 - M11 (Brief 003) | NOT_STARTED | [ROADMAP.md](ROADMAP.md) (scope revised by Brief 003) |
 
 All M2 and M3 checkpoints are implemented and verified with automated, hardware, browser-fixture
 and (partly) live-website tests. What remains is human verification: performing the gestures in
@@ -101,6 +101,5 @@ f036902; ca24ba4 contains its regression test.
 
 1. Director: complete [M2_M3_DIRECTOR_CHECKLIST.md](docs/milestones/M2_M3_DIRECTOR_CHECKLIST.md)
    and report results; then M2 and M3 can be marked COMPLETED.
-2. Co-Director: M4 brief (Windows integration, Academic Comeback / Relapse). Sweeps are already
-   recognized and routed through the dispatcher; their recall should be revisited with more
-   recordings before they switch applications.
+2. Brief 003 supersedes the earlier M4 plan (Academic Comeback / Relapse and application
+   switching were removed; horizontal gestures now switch browser tabs).
