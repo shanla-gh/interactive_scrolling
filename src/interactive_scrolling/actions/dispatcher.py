@@ -43,6 +43,8 @@ from interactive_scrolling.gestures.types import GestureEvent, GestureType
 log = logging.getLogger(__name__)
 
 RecordListener = Callable[[ActionRecord], None]
+AdmissionCheck = Callable[[ActionRecord], str | None]
+"""Returns a reason to refuse the action, or ``None`` (wellbeing pause, co-op arbitration)."""
 ModeListener = Callable[[ControlMode, ControlMode, str], None]
 
 ACTION_TIMEOUT_S = {
@@ -74,6 +76,7 @@ class ActionDispatcher:
         self._queue: queue.Queue[tuple[ActionRecord, int] | None] = queue.Queue(maxsize=1)
         self._record_listeners: list[RecordListener] = []
         self._mode_listeners: list[ModeListener] = []
+        self._admission: list[AdmissionCheck] = []
         self._worker = threading.Thread(target=self._run, name="action-dispatcher", daemon=True)
         self._stopped = False
         self._worker.start()
@@ -85,6 +88,10 @@ class ActionDispatcher:
 
     def add_mode_listener(self, listener: ModeListener) -> None:
         self._mode_listeners.append(listener)
+
+    def add_admission_check(self, check: AdmissionCheck) -> None:
+        """Add a check run for every executable action before it is queued."""
+        self._admission.append(check)
 
     @property
     def mode(self) -> ControlMode:
@@ -158,6 +165,14 @@ class ActionDispatcher:
             )
         if self._controller is None:
             return self._finish(record, ActionStatus.REJECTED, "no controller available")
+        for check in list(self._admission):
+            try:
+                refusal = check(record)
+            except Exception:
+                log.exception("Admission check failed; action refused")
+                refusal = "internal error in an admission check"
+            if refusal:
+                return self._finish(record, ActionStatus.REJECTED, refusal)
         with self._lock:
             if self._busy:
                 return self._finish(record, ActionStatus.REJECTED, "previous action still running")

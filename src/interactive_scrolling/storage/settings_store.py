@@ -16,11 +16,13 @@ new default. Every migration step is listed in ``migrations``.
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 import os
 import secrets
 import tempfile
+import typing
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
@@ -33,10 +35,14 @@ from interactive_scrolling.actions.types import (
     validate_mapping,
 )
 from interactive_scrolling.config.settings import (
+    AppearanceSettings,
     ConfigError,
     ControlHandPreference,
+    CreatorSettings,
+    EffectsSettings,
     GestureSettings,
     SensitivityPreset,
+    WellbeingSettings,
 )
 from interactive_scrolling.gestures.types import GestureType
 from interactive_scrolling.storage.paths import data_dir
@@ -77,6 +83,74 @@ class UserSettings:
     analytics_enabled: bool = True
     bridge_port: int = DEFAULT_BRIDGE_PORT
     pairing_token: str = field(default_factory=new_pairing_token)
+    appearance: AppearanceSettings = field(default_factory=AppearanceSettings)
+    creator: CreatorSettings = field(default_factory=CreatorSettings)
+    wellbeing: WellbeingSettings = field(default_factory=WellbeingSettings)
+    effects: EffectsSettings = field(default_factory=EffectsSettings)
+
+
+SECTIONS: dict[str, type] = {
+    "appearance": AppearanceSettings,
+    "creator": CreatorSettings,
+    "wellbeing": WellbeingSettings,
+    "effects": EffectsSettings,
+}
+"""Simple settings sections stored as JSON objects (fields of bool, int, float, str, enum or
+optional int), validated field by field."""
+
+
+def section_to_json(value: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for f in fields(value):
+        item = getattr(value, f.name)
+        out[f.name] = item.value if isinstance(item, enum.Enum) else item
+    return out
+
+
+def _coerce(raw: Any, kind: Any) -> Any:
+    origin = typing.get_origin(kind)
+    if origin is typing.Union or str(origin) == "<class 'types.UnionType'>":
+        options = [a for a in typing.get_args(kind) if a is not type(None)]
+        if raw is None:
+            return None
+        return _coerce(raw, options[0])
+    if isinstance(kind, type) and issubclass(kind, enum.Enum):
+        return kind(raw)
+    if kind is bool:
+        if not isinstance(raw, bool):
+            raise TypeError("expected true/false")
+        return raw
+    if kind is int:
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            raise TypeError("expected an integer")
+        return raw
+    if kind is float:
+        if isinstance(raw, bool) or not isinstance(raw, int | float):
+            raise TypeError("expected a number")
+        return float(raw)
+    if kind is str:
+        if not isinstance(raw, str):
+            raise TypeError("expected text")
+        return raw
+    raise TypeError(f"unsupported setting type {kind!r}")
+
+
+def section_from_json(cls: type, data: Any, label: str, warnings: list[str]) -> Any:
+    value = cls()
+    if not isinstance(data, dict):
+        if data is not None:
+            warnings.append(f"{label} settings were not an object; defaults used")
+        return value
+    hints = typing.get_type_hints(cls)
+    for f in fields(cls):
+        if f.name not in data:
+            continue
+        raw = data[f.name]
+        try:
+            value = replace(value, **{f.name: _coerce(raw, hints[f.name])})
+        except (ValueError, TypeError, ConfigError) as exc:
+            warnings.append(f"invalid {label}.{f.name} ({raw!r}): {exc}; default used")
+    return value
 
 
 def _gesture_settings_to_json(settings: GestureSettings) -> dict[str, Any]:
@@ -204,9 +278,13 @@ class SettingsStore:
             if token is not None:
                 warnings.append("pairing token invalid; a new one was generated")
             token = new_pairing_token()
+        sections = {
+            name: section_from_json(cls, raw.get(name), name, warnings)
+            for name, cls in SECTIONS.items()
+        }
         for warning in warnings:
             log.warning("Settings: %s", warning)
-        return UserSettings(gestures, mapping, analytics, port, token)
+        return UserSettings(gestures, mapping, analytics, port, token, **sections)
 
     def _backup_v1(self) -> None:
         """Keep the version 1 file next to the new one; it is never overwritten."""
@@ -229,6 +307,8 @@ class SettingsStore:
             "bridge_port": settings.bridge_port,
             "pairing_token": settings.pairing_token,
         }
+        for name in SECTIONS:
+            payload[name] = section_to_json(getattr(settings, name))
         tmp: str | None = None
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)

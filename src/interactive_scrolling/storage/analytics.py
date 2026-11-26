@@ -54,6 +54,16 @@ CREATE TABLE IF NOT EXISTS events (
     latency_ms REAL
 );
 CREATE INDEX IF NOT EXISTS events_day ON events(local_day, kind);
+CREATE TABLE IF NOT EXISTS eye_stats (
+    local_day TEXT NOT NULL,
+    app_session TEXT NOT NULL,
+    screen_s REAL NOT NULL DEFAULT 0,
+    away_s REAL NOT NULL DEFAULT 0,
+    unknown_s REAL NOT NULL DEFAULT 0,
+    blinks INTEGER,
+    longest_screen_s REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (local_day, app_session)
+);
 """
 
 
@@ -66,6 +76,11 @@ class EventKind(enum.Enum):
     CONTROL_SESSION_ENDED = "control_session_ended"
     SHORTS_SESSION_STARTED = "shorts_session_started"
     SHORTS_SESSION_ENDED = "shorts_session_ended"
+    SCROLL_ACTIVE_STARTED = "scroll_active_started"
+    """Active scrolling began (Shorts playing in the focused browser; see wellbeing.sessions)."""
+    SCROLL_ACTIVE_ENDED = "scroll_active_ended"
+    SCROLL_HEARTBEAT = "scroll_heartbeat"
+    """Written every 30 s of active scrolling, so a crash loses at most that much."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +93,28 @@ class AnalyticsEvent:
     reason: str | None = None
     latency_ms: float | None = None
     event_uid: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+
+@dataclass(frozen=True, slots=True)
+class EyeAggregate:
+    """Aggregated passive eye-analytics durations (no per-frame data is ever stored)."""
+
+    ts: float
+    screen_s: float
+    away_s: float
+    unknown_s: float
+    blinks: int | None
+    """``None`` when blinks could not be counted reliably (sampling rate too low)."""
+    longest_screen_s: float
+
+
+@dataclass(frozen=True, slots=True)
+class EyeReport:
+    screen_s: float
+    away_s: float
+    unknown_s: float
+    blinks: int | None
+    longest_screen_s: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,9 +155,9 @@ class AnalyticsStore:
         self.enabled = enabled
         self.app_session = uuid.uuid4().hex
         self._clock = wall_clock
-        self._queue: queue.Queue[AnalyticsEvent | tuple[str, threading.Event] | None] = queue.Queue(
-            maxsize=queue_size
-        )
+        self._queue: queue.Queue[
+            AnalyticsEvent | EyeAggregate | tuple[str, threading.Event] | None
+        ] = queue.Queue(maxsize=queue_size)
         self.dropped = 0
         self.error: str | None = None
         self._read_lock = threading.Lock()
@@ -157,6 +194,46 @@ class AnalyticsStore:
         except queue.Full:
             self.dropped += 1
 
+    def record_eyes(
+        self,
+        screen_s: float,
+        away_s: float,
+        unknown_s: float,
+        blinks: int | None,
+        longest_screen_s: float,
+    ) -> None:
+        """Add eye-analytics durations to today's aggregate. Never blocks or raises."""
+        if not self.enabled:
+            return
+        item = EyeAggregate(self._clock(), screen_s, away_s, unknown_s, blinks, longest_screen_s)
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            self.dropped += 1
+
+    def eye_report(self, day: date | None = None) -> EyeReport | None:
+        day = day or datetime.fromtimestamp(self._clock()).date()
+
+        def query(connection: sqlite3.Connection) -> EyeReport | None:
+            row = connection.execute(
+                "SELECT SUM(screen_s), SUM(away_s), SUM(unknown_s), SUM(blinks), "
+                "COUNT(blinks), COUNT(*), MAX(longest_screen_s) FROM eye_stats "
+                "WHERE local_day = ?",
+                (day.isoformat(),),
+            ).fetchone()
+            if row is None or row[5] == 0:
+                return None
+            screen, away, unknown, blinks, with_blinks, rows, longest = row
+            return EyeReport(
+                screen or 0.0,
+                away or 0.0,
+                unknown or 0.0,
+                int(blinks) if with_blinks == rows and blinks is not None else None,
+                longest or 0.0,
+            )
+
+        return self._read(query)  # type: ignore[return-value]
+
     def flush(self, timeout_s: float = 5.0) -> bool:
         """Wait until all queued events are written (used by tests and shutdown)."""
         done = threading.Event()
@@ -176,6 +253,14 @@ class AnalyticsStore:
         self.flush()
         self._queue.put(None)
         self._writer.join(timeout=5)
+
+    def _reader(self) -> sqlite3.Connection:
+        """A read connection; creates the (empty) schema if nothing has been written yet, so a
+        fresh installation reads as "no data" instead of a database error."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.path, timeout=5)
+        connection.executescript(SCHEMA)
+        return connection
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,9 +282,15 @@ class AnalyticsStore:
                     command, done = item
                     if command == "clear":
                         connection.execute("DELETE FROM events")
+                        connection.execute("DELETE FROM eye_stats")
                         connection.commit()
                         connection.execute("VACUUM")
                     done.set()
+                    continue
+                if isinstance(item, EyeAggregate):
+                    self._write_eyes(connection, item)
+                    connection.commit()
+                    self.error = None
                     continue
                 connection.execute(
                     "INSERT OR IGNORE INTO events (event_uid, ts, local_day, app_session, kind, "
@@ -230,15 +321,36 @@ class AnalyticsStore:
         if connection is not None:
             connection.close()
 
+    def _write_eyes(self, connection: sqlite3.Connection, item: EyeAggregate) -> None:
+        connection.execute(
+            "INSERT INTO eye_stats (local_day, app_session, screen_s, away_s, unknown_s, blinks, "
+            "longest_screen_s) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(local_day, app_session) DO UPDATE SET "
+            "screen_s = screen_s + excluded.screen_s, away_s = away_s + excluded.away_s, "
+            "unknown_s = unknown_s + excluded.unknown_s, "
+            "blinks = CASE WHEN blinks IS NULL OR excluded.blinks IS NULL THEN NULL "
+            "ELSE blinks + excluded.blinks END, "
+            "longest_screen_s = MAX(longest_screen_s, excluded.longest_screen_s)",
+            (
+                local_day(item.ts),
+                self.app_session,
+                item.screen_s,
+                item.away_s,
+                item.unknown_s,
+                item.blinks,
+                item.longest_screen_s,
+            ),
+        )
+
     # ------------------------------------------------------------------ reading
 
     def daily_stats(self, day: date | None = None) -> DailyStats:
         """Statistics for one local calendar day (default: today). Never raises."""
         day = day or datetime.fromtimestamp(self._clock()).date()
         try:
-            with self._read_lock, sqlite3.connect(self.path, timeout=5) as connection:
+            with self._read_lock, self._reader() as connection:
                 return self._query(connection, day)
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, OSError) as exc:
             self.error = f"analytics database error: {exc}"
             return DailyStats(day)
 
@@ -293,6 +405,94 @@ class AnalyticsStore:
                 end,
             ),
         )
+
+    # ------------------------------------------------------------------ report queries
+
+    def _read(self, query: Callable[[sqlite3.Connection], object]) -> object:
+        try:
+            with self._read_lock, self._reader() as connection:
+                return query(connection)
+        except (sqlite3.Error, OSError) as exc:
+            self.error = f"analytics database error: {exc}"
+            return None
+
+    def scroll_intervals(self, day: date | None = None) -> list[tuple[float, float]] | None:
+        """Active scrolling intervals overlapping ``day``, clipped to it (wall-clock seconds).
+
+        An interval left open by an earlier application session (crash, power loss) ends at
+        that session's last recorded event (at most one heartbeat late); one open in the
+        current session runs until now. ``None`` if the database cannot be read.
+        """
+        day = day or datetime.fromtimestamp(self._clock()).date()
+        start, end = _day_bounds(day)
+        now = self._clock()
+        kinds = (
+            EventKind.SCROLL_ACTIVE_STARTED.value,
+            EventKind.SCROLL_ACTIVE_ENDED.value,
+            EventKind.SCROLL_HEARTBEAT.value,
+        )
+
+        def query(connection: sqlite3.Connection) -> list[tuple[float, float]]:
+            rows = connection.execute(
+                "SELECT app_session, kind, ts FROM events WHERE kind IN (?, ?, ?) "
+                "AND ts >= ? AND ts < ? ORDER BY app_session, ts",
+                (*kinds, start - 86400.0, end),
+            ).fetchall()
+            intervals: list[tuple[float, float]] = []
+            open_at: dict[str, float] = {}
+            last_seen: dict[str, float] = {}
+            for session, kind, ts in rows:
+                last_seen[session] = ts
+                if kind == kinds[0]:
+                    open_at.setdefault(session, ts)
+                elif kind == kinds[1] and session in open_at:
+                    intervals.append((open_at.pop(session), ts))
+            for session, begin in open_at.items():
+                finish = now if session == self.app_session else last_seen.get(session, begin)
+                intervals.append((begin, finish))
+            clipped = [(max(a, start), min(b, end)) for a, b in intervals]
+            return [(a, b) for a, b in clipped if b > a]
+
+        return self._read(query)  # type: ignore[return-value]
+
+    def action_outcomes(self, day: date | None = None) -> dict[tuple[str, str], int] | None:
+        """(action, outcome) -> count of final action outcomes on ``day``."""
+        day = day or datetime.fromtimestamp(self._clock()).date()
+
+        def query(connection: sqlite3.Connection) -> dict[tuple[str, str], int]:
+            rows = connection.execute(
+                "SELECT action, outcome, COUNT(*) FROM events WHERE local_day = ? AND kind = ? "
+                "GROUP BY action, outcome",
+                (day.isoformat(), EventKind.ACTION_RESULT.value),
+            ).fetchall()
+            return {(a or "", o or ""): n for a, o, n in rows}
+
+        return self._read(query)  # type: ignore[return-value]
+
+    def dispatched_count(self, day: date | None = None) -> int | None:
+        day = day or datetime.fromtimestamp(self._clock()).date()
+
+        def query(connection: sqlite3.Connection) -> int:
+            return connection.execute(
+                "SELECT COUNT(*) FROM events WHERE local_day = ? AND kind = ?",
+                (day.isoformat(), EventKind.ACTION_DISPATCHED.value),
+            ).fetchone()[0]
+
+        return self._read(query)  # type: ignore[return-value]
+
+    def success_latencies(self, day: date | None = None) -> list[float] | None:
+        """Dispatch-to-confirmation times (ms) of successful actions on ``day``."""
+        day = day or datetime.fromtimestamp(self._clock()).date()
+
+        def query(connection: sqlite3.Connection) -> list[float]:
+            rows = connection.execute(
+                "SELECT latency_ms FROM events WHERE local_day = ? AND kind = ? "
+                "AND outcome = 'succeeded' AND latency_ms IS NOT NULL",
+                (day.isoformat(), EventKind.ACTION_RESULT.value),
+            ).fetchall()
+            return [r[0] for r in rows]
+
+        return self._read(query)  # type: ignore[return-value]
 
     def _session_seconds(
         self,

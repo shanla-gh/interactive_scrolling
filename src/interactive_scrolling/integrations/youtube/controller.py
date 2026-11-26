@@ -62,6 +62,13 @@ class YouTubeStatus:
     signed_in: bool | None = None
     paused: bool | None = None
     liked: bool | None = None
+    browser_focused: bool | None = None
+    """Whether the target browser has the operating-system focus."""
+
+    @property
+    def actively_scrolling(self) -> bool:
+        """A loaded Short is playing in the focused browser (see wellbeing.sessions)."""
+        return self.ready and self.browser_focused is True and self.paused is False
 
 
 class YouTubeShortsController:
@@ -168,6 +175,7 @@ class YouTubeShortsController:
             signed_in=shorts.signed_in if shorts else None,
             paused=shorts.paused if shorts else None,
             liked=shorts.liked if shorts else None,
+            browser_focused=client.context.browser_focused if client and client.context else None,
         )
 
     # ------------------------------------------------------------------ execution

@@ -266,6 +266,158 @@ class GestureSettings:
         return replace(base, **values)  # type: ignore[arg-type]
 
 
+_HEX_COLOR = "0123456789abcdefABCDEF"
+
+
+def _valid_color(value: str) -> bool:
+    return value == "auto" or (
+        isinstance(value, str)
+        and len(value) == 7
+        and value[0] == "#"
+        and all(c in _HEX_COLOR for c in value[1:])
+    )
+
+
+@dataclass(frozen=True)
+class AppearanceSettings:
+    """Visual customization of the overlays (Developer and Content Creator Mode)."""
+
+    skeleton_color: str = "auto"
+    """``auto`` colours each hand by handedness; otherwise ``#rrggbb``."""
+    landmark_scale: float = 1.0
+    line_scale: float = 1.0
+    trail_length_s: float = 0.7
+    show_gesture_feedback: bool = True
+    """The confirmed-gesture banner and candidate progress bar on the video."""
+    show_telemetry: bool = True
+    """Status chips (tracking state, resolution) on the video."""
+
+    def __post_init__(self) -> None:
+        if not _valid_color(self.skeleton_color):
+            raise ConfigError(
+                f"skeleton_color must be 'auto' or #rrggbb, got {self.skeleton_color!r}."
+            )
+        for name, low, high in (
+            ("landmark_scale", 0.3, 3.0),
+            ("line_scale", 0.3, 3.0),
+            ("trail_length_s", 0.1, 3.0),
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not low <= value <= high
+            ):
+                raise ConfigError(f"{name} must be within [{low}, {high}], got {value!r}.")
+
+
+class OverlayCorner(enum.Enum):
+    TOP_LEFT = "top_left"
+    TOP_RIGHT = "top_right"
+    BOTTOM_LEFT = "bottom_left"
+    BOTTOM_RIGHT = "bottom_right"
+    CUSTOM = "custom"
+
+
+@dataclass(frozen=True)
+class CreatorSettings:
+    """The always-on-top Content Creator overlay."""
+
+    width: int = 480
+    height: int = 270
+    x: int | None = None
+    """Window position in screen pixels; ``None`` places it in ``corner``."""
+    y: int | None = None
+    corner: OverlayCorner = OverlayCorner.BOTTOM_RIGHT
+    opacity: float = 1.0
+    show_skeleton: bool = True
+    show_vectors: bool = False
+    show_trails: bool = True
+    show_last_gesture: bool = True
+    show_outcome: bool = True
+    show_counters: bool = False
+    transparent_background: bool = False
+    """Remove the background around the person (local segmentation, presentation only)."""
+
+    def __post_init__(self) -> None:
+        if not (160 <= self.width <= 3840 and 90 <= self.height <= 2160):
+            raise ConfigError(f"Overlay size {self.width}x{self.height} is out of range.")
+        if isinstance(self.opacity, bool) or not 0.3 <= self.opacity <= 1.0:
+            raise ConfigError(f"Overlay opacity must be within [0.3, 1.0], got {self.opacity!r}.")
+        for name in ("x", "y"):
+            value = getattr(self, name)
+            if value is not None and (isinstance(value, bool) or not -20000 <= value <= 20000):
+                raise ConfigError(f"Overlay {name} position {value!r} is out of range.")
+
+
+@dataclass(frozen=True)
+class WellbeingSettings:
+    """Anti-Doomscroll options (all optional; reminders are off until the user enables them)."""
+
+    enabled: bool = False
+    """Show Reality Checks and limit notices."""
+    session_limit_min: float = 20.0
+    daily_budget_min: float = 60.0
+    reality_check_min: float = 15.0
+    """Interval of Reality Check notices during a session (0 = none)."""
+    break_reminders: bool = True
+    pause_at_limit: bool = False
+    """Pause gesture scrolling automatically at the session limit or daily budget."""
+    humorous_labels: bool = True
+    """Playful wording for the Doomscroll Index and Wrapped titles."""
+
+    def __post_init__(self) -> None:
+        for name, low, high in (
+            ("session_limit_min", 1.0, 600.0),
+            ("daily_budget_min", 1.0, 1440.0),
+            ("reality_check_min", 0.0, 240.0),
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not low <= value <= high
+            ):
+                raise ConfigError(f"{name} must be within [{low}, {high}], got {value!r}.")
+
+
+@dataclass(frozen=True)
+class EffectsSettings:
+    """Face-based features. Both are off by default; face inference runs only when one is on."""
+
+    clown_enabled: bool = False
+    clown_stage1_min: float = 10.0
+    clown_stage2_min: float = 20.0
+    clown_stage3_min: float = 30.0
+    clown_preview_stage: int | None = None
+    """Show this stage regardless of the session (for trying the effect); ``None`` = off."""
+    eye_analytics_enabled: bool = False
+    eye_baseline_yaw: float | None = None
+    """Result of the optional one-point calibration (``None``: not calibrated)."""
+    eye_baseline_pitch: float | None = None
+    eye_baseline_gaze: float | None = None
+
+    def __post_init__(self) -> None:
+        stages = (self.clown_stage1_min, self.clown_stage2_min, self.clown_stage3_min)
+        for value in stages:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not 0 <= value <= 600
+            ):
+                raise ConfigError(
+                    f"Clown thresholds must be within [0, 600] minutes, got {value!r}."
+                )
+        if not stages[0] <= stages[1] <= stages[2]:
+            raise ConfigError("Clown stage thresholds must not decrease.")
+        if self.clown_preview_stage is not None and self.clown_preview_stage not in (0, 1, 2, 3):
+            raise ConfigError("clown_preview_stage must be 0-3 or None.")
+
+    @property
+    def clown_thresholds(self) -> tuple[float, float, float]:
+        return (self.clown_stage1_min, self.clown_stage2_min, self.clown_stage3_min)
+
+
 @dataclass
 class AppSettings:
     """Top-level application settings."""
