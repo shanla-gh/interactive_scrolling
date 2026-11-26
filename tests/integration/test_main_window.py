@@ -158,7 +158,8 @@ def test_missing_model_keeps_preview_and_reports(qtbot) -> None:
     )
     qtbot.addWidget(window)
     qtbot.waitUntil(lambda: window.pipeline.tracker_state is TrackerState.UNAVAILABLE, timeout=3000)
-    assert window.tracking_panel.model.text() == "Unavailable"
+    # The panel is updated through a queued signal after the worker changed its state.
+    qtbot.waitUntil(lambda: window.tracking_panel.model.text() == "Unavailable", timeout=3000)
     start(qtbot, window)
     assert window.video.frame.tracking.hand_count == 0
 
