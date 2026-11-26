@@ -357,6 +357,10 @@ class VisionPipeline:
                 if loader is not None and not loader.is_alive():
                     tracker = loaded[0] if loaded else None
                     loader = None
+                    # Statistics so far describe preview-only frames; start fresh so the
+                    # reported latency reflects frames that include inference.
+                    self._processing_stats.reset()
+                    self._latency_stats.reset()
                 item = self._mailbox.take(timeout=0.1)
                 if item is None:
                     continue
