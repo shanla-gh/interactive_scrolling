@@ -41,7 +41,10 @@ def shorts(**overrides):
 def test_valid_messages() -> None:
     assert parse(
         msg(type="hello", protocol=1, token="t" * 20, browser="edge", extension_version="0.2.0")
-    ) == Hello("t" * 20, "edge", "0.2.0")
+    ) == Hello("t" * 20, "edge", "0.2.0", 1)
+    assert parse(
+        msg(type="hello", protocol=2, token="t" * 20, browser="edge", extension_version="0.3.0")
+    ) == Hello("t" * 20, "edge", "0.3.0", 2)
     context = parse(msg(type="context", browser_focused=True, focus_ts=1.5e12, shorts=shorts()))
     assert isinstance(context, Context) and context.shorts.video_id == "abcdefghijk"
     assert parse(msg(type="context", browser_focused=False, focus_ts=0, shorts=None)).shorts is None
@@ -66,7 +69,10 @@ def test_valid_messages() -> None:
         "not json",
         "[]",
         msg(type="eval", code="alert(1)"),
-        msg(type="hello", protocol=2, token="x" * 20, browser="edge"),
+        msg(type="hello", protocol=3, token="x" * 20, browser="edge"),
+        msg(type="hello", protocol=True, token="x" * 20, browser="edge"),
+        msg(type="result", id=RID, outcome="succeeded", tab_index_after=-1),
+        msg(type="result", id=RID, outcome="succeeded", tab_count="3"),
         msg(type="hello", protocol=1, token="", browser="edge"),
         msg(type="hello", protocol=1, token="x" * 20, browser="firefox"),
         msg(type="hello", protocol=1, token="x" * 300, browser="edge"),
@@ -99,4 +105,12 @@ def test_only_fixed_commands_can_be_built() -> None:
     with pytest.raises(ProtocolError):
         protocol.command_message(RID, "open_url", None, 1000)
     with pytest.raises(ProtocolError):
+        protocol.command_message(RID, "close_tab", None, 1000)
+    with pytest.raises(ProtocolError):
         protocol.command_message("x", "next_short", None, 1000)
+
+
+def test_tab_commands_never_carry_page_data() -> None:
+    message = json.loads(protocol.command_message(RID, "next_browser_tab", "abcdefghijk", 2000))
+    assert message["action"] == "next_browser_tab"
+    assert message["video_id"] is None

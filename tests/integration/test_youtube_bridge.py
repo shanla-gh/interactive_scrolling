@@ -42,7 +42,14 @@ def server() -> Iterator[tuple[BridgeServer, YouTubeShortsController, list[bool]
 class FakeExtension:
     """Speaks the extension side of the protocol and answers commands with a script."""
 
-    def __init__(self, port: int, token: str = TOKEN, origin: str = ORIGIN, browser: str = "edge"):
+    def __init__(
+        self,
+        port: int,
+        token: str = TOKEN,
+        origin: str = ORIGIN,
+        browser: str = "edge",
+        protocol: int = 2,
+    ):
         self.ws: ClientConnection = connect(
             f"ws://127.0.0.1:{port}/bridge", origin=origin, open_timeout=5
         )
@@ -50,10 +57,10 @@ class FakeExtension:
             json.dumps(
                 {
                     "type": "hello",
-                    "protocol": 1,
+                    "protocol": protocol,
                     "token": token,
                     "browser": browser,
-                    "extension_version": "0.2.0",
+                    "extension_version": "0.3.0" if protocol >= 2 else "0.2.0",
                 }
             )
         )
@@ -86,8 +93,14 @@ class FakeExtension:
         visible: bool = True,
         shorts: bool = True,
         loaded: bool = True,
+        focused: bool = True,
     ) -> None:
-        payload = {"type": "context", "browser_focused": True, "focus_ts": focus_ts, "shorts": None}
+        payload = {
+            "type": "context",
+            "browser_focused": focused,
+            "focus_ts": focus_ts,
+            "shorts": None,
+        }
         if shorts:
             payload["shorts"] = {
                 "tab_id": 1,
@@ -166,7 +179,7 @@ def test_authenticated_extension_is_registered(server) -> None:
     bridge, controller, _ = server
     ext = FakeExtension(bridge.port)
     try:
-        assert ext.welcome == {"type": "welcome", "protocol": 1}
+        assert ext.welcome == {"type": "welcome", "protocol": 2}
         assert wait_until(lambda: len(bridge.clients()) == 1)
         assert (
             controller.check(ActionType.NEXT_SHORT).reason
@@ -401,4 +414,98 @@ def test_changing_the_pairing_code_disconnects_clients(server) -> None:
     assert wait_until(lambda: len(bridge.clients()) == 1)
     bridge.set_token("a-brand-new-pairing-code-000")
     assert wait_until(lambda: bridge.clients() == [])
+    ext.close()
+
+
+# ---------------------------------------------------------------------- tab navigation
+
+
+def tab_reply(before: int, after: int | None, count: int, outcome: str = "succeeded"):
+    reply = {"outcome": outcome, "reason": "", "tab_index_before": before, "tab_count": count}
+    if after is not None:
+        reply["tab_index_after"] = after
+    return lambda cmd: reply
+
+
+def test_tab_navigation_works_without_a_shorts_tab(server) -> None:
+    # The user left Shorts: Shorts actions are refused, tab navigation still works.
+    bridge, controller, _ = server
+    ext = FakeExtension(bridge.port)
+    ext.respond = tab_reply(1, 2, 4)
+    ext.context(shorts=False)
+    assert wait_until(lambda: controller.check(ActionType.NEXT_BROWSER_TAB).ready)
+    assert not controller.check(ActionType.NEXT_SHORT).ready
+    result = execute(controller, ActionType.NEXT_BROWSER_TAB)
+    assert result.status is ActionStatus.SUCCEEDED
+    assert result.detail == "tab 3 of 4 active"
+    command = ext.commands[-1]
+    assert command["action"] == "next_browser_tab"
+    assert command["video_id"] is None  # tab commands carry no page data
+    ext.close()
+
+
+def test_tab_navigation_requires_the_browser_to_be_the_active_window(server) -> None:
+    bridge, controller, _ = server
+    ext = FakeExtension(bridge.port)
+    ext.context(focused=False)
+    assert wait_until(lambda: bridge.clients() and bridge.clients()[0].context is not None)
+    check = controller.check(ActionType.PREVIOUS_BROWSER_TAB)
+    assert not check.ready
+    assert check.reason == "the browser is not the active window"
+    assert execute(controller, ActionType.PREVIOUS_BROWSER_TAB).status is ActionStatus.REJECTED
+    assert ext.commands == []
+    ext.close()
+
+
+def test_tab_navigation_targets_only_the_focused_browser(server) -> None:
+    bridge, controller, _ = server
+    edge = FakeExtension(bridge.port, browser="edge")
+    chrome = FakeExtension(bridge.port, browser="chrome")
+    edge.respond = tab_reply(0, 1, 2)
+    chrome.respond = tab_reply(0, 1, 2)
+    edge.context(focus_ts=1000.0, focused=False, shorts=False)
+    chrome.context(focus_ts=2000.0, focused=True, shorts=False)
+    assert wait_until(lambda: controller.check(ActionType.NEXT_BROWSER_TAB).ready)
+    assert execute(controller, ActionType.NEXT_BROWSER_TAB).status is ActionStatus.SUCCEEDED
+    assert len(chrome.commands) == 1 and edge.commands == []
+    edge.close()
+    chrome.close()
+
+
+def test_last_tab_is_reported_as_rejected_without_wrapping(server) -> None:
+    bridge, controller, _ = server
+    ext = FakeExtension(bridge.port)
+    ext.respond = lambda cmd: {
+        "outcome": "rejected",
+        "reason": "already at the last tab",
+        "tab_index_before": 3,
+        "tab_count": 4,
+    }
+    ext.context(shorts=False)
+    assert wait_until(lambda: controller.check(ActionType.NEXT_BROWSER_TAB).ready)
+    result = execute(controller, ActionType.NEXT_BROWSER_TAB)
+    assert result.status is ActionStatus.REJECTED
+    assert result.reason == "already at the last tab"
+    ext.close()
+
+
+def test_outdated_extension_cannot_switch_tabs_but_still_controls_shorts(server) -> None:
+    bridge, controller, _ = server
+    ext = FakeExtension(bridge.port, protocol=1)
+    ext.context()
+    assert wait_until(lambda: controller.check(ActionType.NEXT_SHORT).ready)
+    check = controller.check(ActionType.NEXT_BROWSER_TAB)
+    assert not check.ready and "outdated" in check.reason
+    ext.close()
+
+
+def test_tab_result_with_invalid_index_is_rejected_by_the_schema(server) -> None:
+    bridge, controller, _ = server
+    ext = FakeExtension(bridge.port)
+    ext.respond = lambda cmd: {"outcome": "succeeded", "reason": "", "tab_index_after": -5}
+    ext.context(shorts=False)
+    assert wait_until(lambda: controller.check(ActionType.NEXT_BROWSER_TAB).ready)
+    # The malformed confirmation is discarded, so the outcome is unknown, never success.
+    result = execute(controller, ActionType.NEXT_BROWSER_TAB, timeout=0.3)
+    assert result.status is ActionStatus.UNKNOWN
     ext.close()

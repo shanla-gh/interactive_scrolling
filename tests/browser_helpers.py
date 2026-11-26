@@ -151,6 +151,25 @@ class Browser:
         self.activate(session)
         return session
 
+    def new_window(self) -> Session:
+        """Open a page in a new browser window (it becomes the last focused window)."""
+        version = json.load(urllib.request.urlopen(f"http://127.0.0.1:{self.port}/json/version"))
+        browser = Session(version["webSocketDebuggerUrl"])
+        try:
+            target = browser.call("Target.createTarget", url="about:blank", newWindow=True)
+        finally:
+            browser.close()
+        target_id = target["targetId"]
+        for info in self.targets():
+            if info["id"] == target_id:
+                return Session(info["webSocketDebuggerUrl"], target_id)
+        raise RuntimeError("new window target not found")
+
+    def close_tab(self, session: Session) -> None:
+        session.close()
+        with contextlib.suppress(OSError):
+            urllib.request.urlopen(f"http://127.0.0.1:{self.port}/json/close/{session.target_id}")
+
     def activate(self, session: Session) -> None:
         """Bring the tab to the front (visible browsers may open other tabs at startup)."""
         url = f"http://127.0.0.1:{self.port}/json/activate/{session.target_id}"

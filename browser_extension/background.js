@@ -1,19 +1,25 @@
 // Service worker: connects to the local Interactive Scrolling desktop app over a loopback
-// WebSocket, reports which YouTube Shorts tab (if any) is the current target, and relays the
-// app's commands to that tab's content script.
+// WebSocket, reports which YouTube Shorts tab (if any) is the current target and whether the
+// browser is the active application, relays Shorts commands to that tab's content script and
+// performs tab navigation itself.
 //
 // Security model:
 // * Connects only to ws://127.0.0.1:<port>/bridge and authenticates with the pairing code
 //   shown in the desktop app. The app accepts only this extension's origin.
-// * Accepts exactly four commands (next/previous/like/toggle playback) and executes them only
-//   in the active tab of the last focused browser window, and only if that tab is a visible
-//   YouTube Shorts page showing the Short the app expects.
-// * Host access is limited to https://www.youtube.com/*; other tabs' URLs are not readable.
+// * Accepts exactly six commands. The four Shorts commands (next/previous/like/toggle
+//   playback) run only in the active tab of the last focused browser window, and only if that
+//   tab is a visible YouTube Shorts page showing the Short the app expects.
+// * The two tab commands activate the neighbouring tab of the focused browser window only:
+//   never another window, never a wrap-around at the first or last tab, and only while a
+//   window of this browser has the operating-system focus.
+// * Host access is limited to https://www.youtube.com/*; other tabs' URLs and titles are not
+//   readable and are never needed (tab navigation uses tab positions only).
 "use strict";
 
 const DEFAULT_PORT = 47815;
-const PROTOCOL = 1;
-const ACTIONS = new Set(["next_short", "previous_short", "like_short", "toggle_playback"]);
+const PROTOCOL = 2;
+const SHORTS_ACTIONS = new Set(["next_short", "previous_short", "like_short", "toggle_playback"]);
+const TAB_ACTIONS = new Set(["next_browser_tab", "previous_browser_tab"]);
 
 const tabStates = new Map(); // tabId -> { state, ts }
 let socket = null;
@@ -123,19 +129,27 @@ function handleMessage(raw) {
   }
 }
 
-async function targetTab() {
-  let win;
+async function lastFocusedWindow(populate) {
   try {
-    win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    return (await chrome.windows.getLastFocused({ windowTypes: ["normal"], populate })) || null;
   } catch {
     return null;
   }
+}
+
+async function targetTab() {
+  const win = await lastFocusedWindow(false);
   if (!win) return null;
   const [tab] = await chrome.tabs.query({ active: true, windowId: win.id });
   return tab || null;
 }
 
 async function currentContext() {
+  // Whether a normal window of this browser has the operating-system focus right now. Read
+  // from the window itself rather than only from focus events, which a restarted service
+  // worker would have missed.
+  const win = await lastFocusedWindow(false);
+  browserFocused = !!(win && win.focused);
   const tab = await targetTab();
   const entry = tab ? tabStates.get(tab.id) : null;
   const shorts =
@@ -159,11 +173,47 @@ async function sendContext(force) {
   send(context);
 }
 
+const handledCommands = new Set();
+
+async function switchTab(action, reply) {
+  const win = await lastFocusedWindow(true);
+  if (!win || !win.focused || !Array.isArray(win.tabs)) {
+    return reply("rejected", "the browser window is not active");
+  }
+  const tabs = win.tabs.slice().sort((a, b) => a.index - b.index);
+  const current = tabs.find((t) => t.active);
+  if (!current) return reply("rejected", "no active tab in the browser window");
+  const step = action === "next_browser_tab" ? 1 : -1;
+  const position = tabs.indexOf(current);
+  const target = tabs[position + step];
+  const counts = { tab_index_before: position, tab_count: tabs.length };
+  if (!target) {
+    const reason = step > 0 ? "already at the last tab" : "already at the first tab";
+    return reply("rejected", reason, counts);
+  }
+  try {
+    await chrome.tabs.update(target.id, { active: true });
+  } catch (error) {
+    return reply("failed", `the tab could not be activated (${String(error).slice(0, 60)})`, counts);
+  }
+  const [now] = await chrome.tabs.query({ active: true, windowId: win.id });
+  if (now && now.id === target.id) {
+    sendContext(true);
+    return reply("succeeded", "", Object.assign(counts, { tab_index_after: position + step }));
+  }
+  return reply("failed", "the tab did not become active", counts);
+}
+
 async function executeCommand(message) {
   const { id, action, video_id: videoId, timeout_ms: timeoutMs } = message;
   const reply = (outcome, reason, extra) =>
     send(Object.assign({ type: "result", id, outcome, reason: reason || "" }, extra || {}));
-  if (typeof id !== "string" || !ACTIONS.has(action)) return reply("rejected", "invalid command");
+  const known = SHORTS_ACTIONS.has(action) || TAB_ACTIONS.has(action);
+  if (typeof id !== "string" || !known) return reply("rejected", "invalid command");
+  if (handledCommands.has(id)) return reply("rejected", "duplicate command");
+  handledCommands.add(id);
+  if (handledCommands.size > 200) handledCommands.delete(handledCommands.values().next().value);
+  if (TAB_ACTIONS.has(action)) return switchTab(action, reply);
   const tab = await targetTab();
   const entry = tab ? tabStates.get(tab.id) : null;
   if (!tab || !entry || !entry.state.is_shorts || !tab.url || !tab.url.startsWith("https://www.youtube.com/shorts/")) {

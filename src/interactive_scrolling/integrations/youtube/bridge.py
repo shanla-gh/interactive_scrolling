@@ -9,7 +9,7 @@ Security boundaries
   constant time) within ``HELLO_TIMEOUT_S``; otherwise the connection is closed with 4001.
 * Messages are size limited and validated against a strict schema
   (:mod:`.protocol`); repeated invalid messages close the connection.
-* The server only sends four fixed commands. There is no generic command channel.
+* The server only sends six fixed commands. There is no generic command channel.
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ class ClientInfo:
     connected_ns: int
     context: Context | None = None
     context_ns: int | None = None
+    protocol: int = protocol.PROTOCOL_VERSION
 
 
 @dataclass(slots=True)
@@ -166,6 +167,7 @@ class BridgeServer:
                     c.connected_ns,
                     c.context,
                     c.context_ns,
+                    c.protocol,
                 )
                 for c in self._clients.values()
             ]
@@ -229,7 +231,13 @@ class BridgeServer:
             log.warning("Browser extension not authenticated: %s", exc)
             connection.close(4001, "unauthorized")
             return
-        client = ClientInfo(uuid.uuid4().hex, hello.browser, hello.extension_version, self._clock())
+        client = ClientInfo(
+            uuid.uuid4().hex,
+            hello.browser,
+            hello.extension_version,
+            self._clock(),
+            protocol=hello.protocol,
+        )
         with self._lock:
             full = len(self._clients) >= MAX_CONNECTIONS
         if full:

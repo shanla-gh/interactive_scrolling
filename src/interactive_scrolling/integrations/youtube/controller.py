@@ -1,13 +1,22 @@
-"""YouTube Shorts controller: context validation and confirmed execution via the extension.
+"""Browser controller: YouTube Shorts and tab navigation through the companion extension.
 
-Target policy (deterministic)
------------------------------
+Shorts target policy (deterministic)
+------------------------------------
 A browser connection is a candidate when its latest context (at most ``CONTEXT_MAX_AGE_S``
 old) reports that the active tab of its last focused window is a YouTube Shorts page that is
 visible and shows a video. With several candidates (e.g. Chrome and Edge both showing Shorts)
 the one whose window was focused most recently is chosen; if that is undecidable the action is
 rejected. A command is sent to exactly one tab and carries the expected video id, so it is
 rejected if the user scrolled in the meantime.
+
+Tab target policy
+-----------------
+Tab navigation does not need a Shorts page (the user must be able to leave Shorts and come
+back), but it does need the supported browser to be the *active application*: a connection is
+a candidate only if its context reports that one of its normal windows has the operating
+system focus. The extension then moves to the neighbouring tab of that focused window only
+(never another window, never another application, no wrap-around at the first or last tab)
+and confirms the newly active tab.
 """
 
 from __future__ import annotations
@@ -18,6 +27,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from interactive_scrolling.actions.types import (
+    SHORTS_ACTIONS,
+    TAB_ACTIONS,
     ActionResult,
     ActionStatus,
     ActionType,
@@ -102,11 +113,43 @@ class YouTubeShortsController:
             return None, "several browsers show Shorts; click the one to control"
         return ready[0], ""
 
+    def _tab_target(self) -> tuple[ClientInfo | None, str]:
+        if not self.bridge.listening:
+            return None, self.bridge.error or "browser bridge not running"
+        clients = self.bridge.clients()
+        if not clients:
+            return None, "browser extension not connected"
+        now = self._clock()
+        max_age = int(CONTEXT_MAX_AGE_S * NS_PER_S)
+        fresh = [
+            c
+            for c in clients
+            if c.context is not None and c.context_ns is not None and now - c.context_ns <= max_age
+        ]
+        if not fresh:
+            return None, "waiting for the browser to report its state"
+        focused = [c for c in fresh if c.context.browser_focused]  # type: ignore[union-attr]
+        if not focused:
+            return None, "the browser is not the active window"
+        focused.sort(key=lambda c: c.context.focus_ts, reverse=True)  # type: ignore[union-attr]
+        if len(focused) > 1 and focused[0].context.focus_ts == focused[1].context.focus_ts:  # type: ignore[union-attr]
+            return None, "several browsers report focus; click the one to control"
+        client = focused[0]
+        if client.protocol < 2:
+            return None, "browser extension is outdated; reload it in the extensions page"
+        return client, ""
+
+    def _target_for(self, action: ActionType) -> tuple[ClientInfo | None, str]:
+        if action in TAB_ACTIONS:
+            return self._tab_target()
+        return self._target()
+
     def check(self, action: ActionType) -> ControllerCheck:
-        if not action.available:
-            return ControllerCheck(False, "action not supported by the YouTube controller")
-        client, reason = self._target()
-        self._update_session(client is not None)
+        if action not in SHORTS_ACTIONS and action not in TAB_ACTIONS:
+            return ControllerCheck(False, "action not supported by the browser controller")
+        client, reason = self._target_for(action)
+        if action in SHORTS_ACTIONS:
+            self._update_session(client is not None)
         return ControllerCheck(client is not None, reason)
 
     def status(self) -> YouTubeStatus:
@@ -130,12 +173,14 @@ class YouTubeShortsController:
     # ------------------------------------------------------------------ execution
 
     def execute(self, action: ActionType, request_id: str, timeout_s: float) -> ActionResult:
-        client, reason = self._target()
+        client, reason = self._target_for(action)
         if client is None:
             return ActionResult(ActionStatus.REJECTED, reason)
-        shorts = client.context.shorts  # type: ignore[union-attr]
+        video_id = None
+        if action in SHORTS_ACTIONS:
+            video_id = client.context.shorts.video_id  # type: ignore[union-attr]
         response = self.bridge.request(
-            client.client_id, request_id, action.value, shorts.video_id, timeout_s
+            client.client_id, request_id, action.value, video_id, timeout_s
         )
         if isinstance(response, str):
             # No confirmation: the command may or may not have taken effect.
@@ -146,7 +191,9 @@ class YouTubeShortsController:
     def _to_result(response: CommandResult) -> ActionResult:
         status = _OUTCOMES[response.outcome]
         detail = ""
-        if response.video_id_after and response.video_id_before:
+        if response.tab_index_after is not None and response.tab_count is not None:
+            detail = f"tab {response.tab_index_after + 1} of {response.tab_count} active"
+        elif response.video_id_after and response.video_id_before:
             detail = "active Short changed"
         elif response.paused is not None:
             detail = "paused" if response.paused else "playing"

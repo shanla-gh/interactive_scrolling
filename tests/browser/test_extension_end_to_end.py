@@ -211,3 +211,104 @@ def test_extension_disconnect_makes_context_unavailable(stack) -> None:
     assert not bridge.clients()
     worker.eval(f"chrome.storage.local.set({{token: '{TOKEN}'}}).then(() => connect())")
     assert wait_until(lambda: len(bridge.clients()) == 1, timeout_s=20)
+
+
+# ---------------------------------------------------------------------- tab navigation
+
+
+def active_tab_index(worker: Session) -> int:
+    return worker.eval(
+        "chrome.windows.getLastFocused({windowTypes: ['normal'], populate: true})"
+        ".then(w => w.tabs.find(t => t.active).index)"
+    )
+
+
+def tab_count(worker: Session) -> int:
+    return worker.eval(
+        "chrome.windows.getLastFocused({windowTypes: ['normal'], populate: true})"
+        ".then(w => w.tabs.length)"
+    )
+
+
+def test_tab_navigation_leaves_and_returns_to_shorts(stack) -> None:
+    browser, _bridge, controller, page = stack
+    worker = browser.extension_worker()
+    browser.activate(page)
+    open_short(page, controller, "?signed_in=1")
+    other = browser.new_tab()  # a non-YouTube tab to the right of the Shorts tab
+    try:
+        browser.activate(page)
+        assert wait_until(lambda: controller.check(ActionType.NEXT_SHORT).ready, timeout_s=10)
+        start = active_tab_index(worker)
+        count = tab_count(worker)
+        assert start == count - 2
+
+        # Right: leave Shorts for the next tab.
+        assert wait_until(lambda: controller.check(ActionType.NEXT_BROWSER_TAB).ready)
+        result = controller.execute(ActionType.NEXT_BROWSER_TAB, uuid.uuid4().hex, 2.0)
+        assert result.status is ActionStatus.SUCCEEDED, result
+        assert active_tab_index(worker) == start + 1
+        assert wait_until(lambda: not controller.check(ActionType.NEXT_SHORT).ready)
+
+        # At the last tab: no wrap-around.
+        result = controller.execute(ActionType.NEXT_BROWSER_TAB, uuid.uuid4().hex, 2.0)
+        assert result.status is ActionStatus.REJECTED
+        assert result.reason == "already at the last tab"
+        assert active_tab_index(worker) == start + 1
+
+        # Left: back to the Shorts tab, where Shorts control is available again.
+        result = controller.execute(ActionType.PREVIOUS_BROWSER_TAB, uuid.uuid4().hex, 2.0)
+        assert result.status is ActionStatus.SUCCEEDED, result
+        assert active_tab_index(worker) == start
+        assert wait_until(lambda: controller.check(ActionType.NEXT_SHORT).ready, timeout_s=10)
+    finally:
+        other.close()
+        browser.close_tab(other)
+        browser.activate(page)
+
+
+def test_first_tab_is_not_wrapped_around(stack) -> None:
+    browser, _bridge, controller, page = stack
+    worker = browser.extension_worker()
+    first = worker.eval(
+        "chrome.windows.getLastFocused({windowTypes: ['normal'], populate: true})"
+        ".then(w => chrome.tabs.update(w.tabs[0].id, {active: true})).then(() => true)"
+    )
+    assert first
+    assert active_tab_index(worker) == 0
+    assert wait_until(lambda: controller.check(ActionType.PREVIOUS_BROWSER_TAB).ready)
+    result = controller.execute(ActionType.PREVIOUS_BROWSER_TAB, uuid.uuid4().hex, 2.0)
+    assert result.status is ActionStatus.REJECTED
+    assert result.reason == "already at the first tab"
+    assert active_tab_index(worker) == 0
+    browser.activate(page)
+
+
+def test_tab_navigation_stays_inside_the_focused_window(stack) -> None:
+    browser, _bridge, controller, page = stack
+    worker = browser.extension_worker()
+    browser.activate(page)
+    before = worker.eval(
+        "chrome.windows.getAll({populate: true}).then(ws => ws.map(w => "
+        "[w.id, w.tabs.findIndex(t => t.active)]))"
+    )
+    window = browser.new_window()
+    try:
+        assert wait_until(lambda: controller.check(ActionType.PREVIOUS_BROWSER_TAB).ready)
+        focused = worker.eval(
+            "chrome.windows.getLastFocused({windowTypes: ['normal']}).then(w => w.id)"
+        )
+        # The new window has a single tab: nothing to switch to, and the other window's active
+        # tab must not change.
+        result = controller.execute(ActionType.PREVIOUS_BROWSER_TAB, uuid.uuid4().hex, 2.0)
+        assert result.status is ActionStatus.REJECTED
+        after = worker.eval(
+            "chrome.windows.getAll({populate: true}).then(ws => ws.map(w => "
+            "[w.id, w.tabs.findIndex(t => t.active)]))"
+        )
+        for window_id, index in before:
+            assert [window_id, index] in after
+        assert focused not in [w for w, _ in before]
+    finally:
+        browser.close_tab(window)
+        browser.activate(page)

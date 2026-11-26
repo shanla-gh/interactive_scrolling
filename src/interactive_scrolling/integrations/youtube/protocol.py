@@ -1,8 +1,11 @@
-"""Message schema between the desktop app and the browser extension (protocol version 1).
+"""Message schema between the desktop app and the browser extension (protocol version 2).
 
 Every inbound message is parsed and validated here; anything that does not match the schema
 exactly is rejected. The app only ever sends ``welcome``, ``ping`` and ``command`` messages
-with one of four fixed actions, so the extension cannot be made to do anything else.
+with one of six fixed actions, so the extension cannot be made to do anything else.
+
+Version 2 adds the two tab-navigation commands. Version 1 extensions (0.2) may still connect;
+the controller refuses tab actions for them with a request to reload the extension.
 """
 
 from __future__ import annotations
@@ -12,11 +15,15 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+SUPPORTED_PROTOCOLS = frozenset({1, 2})
 MAX_MESSAGE_BYTES = 16 * 1024
 BROWSERS = frozenset({"chrome", "edge", "chromium"})
 OUTCOMES = frozenset({"succeeded", "no_change", "rejected", "failed", "unknown"})
-COMMAND_ACTIONS = frozenset({"next_short", "previous_short", "like_short", "toggle_playback"})
+SHORTS_COMMANDS = frozenset({"next_short", "previous_short", "like_short", "toggle_playback"})
+TAB_COMMANDS = frozenset({"next_browser_tab", "previous_browser_tab"})
+COMMAND_ACTIONS = SHORTS_COMMANDS | TAB_COMMANDS
+MAX_TABS = 10_000
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{6,32}$")
 _REQUEST_ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -30,6 +37,7 @@ class Hello:
     token: str
     browser: str
     extension_version: str
+    protocol: int = PROTOCOL_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +69,10 @@ class CommandResult:
     video_id_after: str | None = None
     paused: bool | None = None
     liked: bool | None = None
+    tab_index_before: int | None = None
+    tab_index_after: int | None = None
+    tab_count: int | None = None
+    """Tab positions in the window (0-based) for tab commands; no tab ids, titles or URLs."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +102,17 @@ def _optional_video_id(data: dict[str, Any], key: str) -> str | None:
     return value
 
 
+def _optional_index(data: dict[str, Any], key: str) -> int | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    _require(
+        isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= MAX_TABS,
+        f"invalid {key}",
+    )
+    return value
+
+
 def _short_text(data: dict[str, Any], key: str, limit: int) -> str:
     value = data.get(key, "")
     _require(isinstance(value, str) and len(value) <= limit, f"{key} must be text <= {limit}")
@@ -108,12 +131,18 @@ def parse(raw: str | bytes) -> Message:
     _require(isinstance(data, dict), "message must be an object")
     kind = data.get("type")
     if kind == "hello":
-        _require(data.get("protocol") == PROTOCOL_VERSION, "unsupported protocol version")
+        version = data.get("protocol")
+        _require(
+            isinstance(version, int)
+            and not isinstance(version, bool)
+            and version in SUPPORTED_PROTOCOLS,
+            "unsupported protocol version",
+        )
         token = data.get("token")
         _require(isinstance(token, str) and 0 < len(token) <= 256, "invalid token")
         browser = data.get("browser")
         _require(browser in BROWSERS, "unknown browser")
-        return Hello(token, browser, _short_text(data, "extension_version", 32))
+        return Hello(token, browser, _short_text(data, "extension_version", 32), version)
     if kind == "context":
         focused = data.get("browser_focused")
         _require(isinstance(focused, bool), "browser_focused must be boolean")
@@ -156,6 +185,9 @@ def parse(raw: str | bytes) -> Message:
             video_id_after=_optional_video_id(data, "video_id_after"),
             paused=_optional_bool(data, "paused"),
             liked=_optional_bool(data, "liked"),
+            tab_index_before=_optional_index(data, "tab_index_before"),
+            tab_index_after=_optional_index(data, "tab_index_after"),
+            tab_count=_optional_index(data, "tab_count"),
         )
     if kind == "pong":
         return Pong()
@@ -167,6 +199,8 @@ def command_message(request_id: str, action: str, video_id: str | None, timeout_
         raise ProtocolError(f"unsupported action {action!r}")
     if not _REQUEST_ID.match(request_id):
         raise ProtocolError("invalid request id")
+    if action in TAB_COMMANDS:
+        video_id = None  # tab commands never carry page data
     return json.dumps(
         {
             "type": "command",

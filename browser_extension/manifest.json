@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Interactive Scrolling Bridge",
-  "version": "0.2.0",
-  "description": "Lets the Interactive Scrolling desktop app on this computer control YouTube Shorts in this browser after pairing.",
+  "version": "0.3.0",
+  "description": "Lets the Interactive Scrolling desktop app on this computer control YouTube Shorts and switch between tabs of the active window in this browser after pairing.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr5+gnNGGI6shHTBkF0N5w6mXZiVlcyYms/OdZlm8FBcuVI8VQaVTUusUCgXyVMFVgxxD/fn8QIOz7xKvzTJGUFz7UjKnxYeAZNOgnqYnUgoGljf4H74xhMVrIwVl30bNle2Kt9BRImQXWMI7LHJk4qkXu7jElKsNbgpYiQAAUlWHzu5aoX1UFQuP84PGkX/JiT9F5PSJeSJc/GACHDukDayDhc5Cv/4q5sL5HT3c/hbPObwo9eWC1kOe7Efpv8bHshS+0vd18fc0Y4pE1wN5BX5iqd8TOMgdRiSVLa8Qorujuo92py1+PFS2YC6cCU8fOHdHmotoa+BuICIlvvbTFQIDAQAB",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
