@@ -1,4 +1,4 @@
-# YouTube Shorts integration
+# Browser integration: YouTube Shorts and tab navigation
 
 ## Strategy (ADR-011)
 
@@ -41,8 +41,8 @@ still accepts `--load-extension` (branded Chrome 158 no longer does).
 | Who may connect | WebSocket upgrade only on `/bridge` and only with `Origin: chrome-extension://phcdgkmcjbgdligepbkfkceejlbbmlio`; web pages are refused with 403 |
 | Authentication | First message must be `hello` with the pairing code (constant-time comparison) within 5 s, else close code 4001 |
 | Input validation | Strict schema per message type, 16 KB size limit, binary frames refused; 5 invalid messages close the connection |
-| Commands | Only `next_short`, `previous_short`, `like_short`, `toggle_playback`; no generic channel |
-| Extension permissions | `storage` and host access to `https://www.youtube.com/*` only; other tabs' URLs are not readable |
+| Commands | Only `next_short`, `previous_short`, `like_short`, `toggle_playback`, `next_browser_tab`, `previous_browser_tab`; no generic channel |
+| Extension permissions | `storage` and host access to `https://www.youtube.com/*` only (unchanged by tab navigation, which needs no `tabs` permission); other tabs' URLs and titles are not readable |
 | Target | Only the active tab of the last focused browser window, only if it is a visible `/shorts/` page whose video has loaded, only if it still shows the Short the app expects |
 | Credentials | None collected; the user's normal browser session is used; liking while signed out is refused without clicking |
 | Stored data | Pairing code and port in `chrome.storage.local`; the app stores the code in `%LOCALAPPDATA%\interactive_scrolling\settings.json` |
@@ -59,6 +59,32 @@ times are rejected as ambiguous. Each command carries the expected video id and 
 re-validates everything before acting. YouTube ignores navigation until the active video has
 loaded (observed on the live site), so loading Shorts are rejected as "still loading".
 
+## Tab navigation (Brief 003)
+
+* `next_browser_tab` / `previous_browser_tab` (default: index swipe right / left) activate the
+  tab directly to the right / left of the active tab **in the focused normal window** of the
+  browser. Positions come from `chrome.windows.getLastFocused({populate: true})`; titles and
+  URLs are neither needed nor readable.
+* Context: the app sends tab commands only to a connected browser whose context reports that
+  one of its windows has the operating-system focus (`browser_focused`, read from
+  `window.focused` at every report, not only from focus events). No Shorts page is required, so
+  the user can navigate away from Shorts and back. If several browsers report focus, the one
+  focused most recently is used; equal times are rejected.
+* At the first or last tab nothing changes (`rejected`: "already at the first/last tab"); there
+  is no wrap-around. Other windows and other applications are never touched (the extension only
+  calls `chrome.tabs.update` on a tab of the focused window).
+* Confirmation: success only if the target tab is the active tab afterwards; the result carries
+  the 0-based positions and the tab count, which the app shows ("tab 3 of 4 active") and never
+  stores.
+* Duplicates: the dispatcher executes one action at a time and the extension ignores a command
+  id it has already handled.
+* Compatibility: protocol version 2. Extensions of version 0.2 (protocol 1) still control Shorts;
+  for tab actions the app answers "browser extension is outdated; reload it".
+* Verified with the real extension in headless Edge (`tests/browser/`): leave Shorts to the
+  right, no wrap at the last and first tab, back to Shorts with Shorts control available again,
+  a second window is never affected. Chrome uses the same Chromium APIs but is not automated
+  (branded Chrome no longer accepts `--load-extension`).
+
 ## Outcomes
 
 | Action | Success means | Other outcomes |
@@ -66,6 +92,7 @@ loaded (observed on the live site), so loading Shorts are rejected as "still loa
 | Next / previous | the active Short id changed within the timeout | rejected (no next / first Short, still loading, context changed), failed (did not change) |
 | Like | `aria-pressed` became `true` | no change (already liked; never unliked), rejected (not signed in, YouTube asked to sign in), unknown (no confirmation) |
 | Pause / resume | the video's `paused` state flipped | failed (browser blocked playback / state unchanged), rejected (no video) |
+| Next / previous tab | the neighbouring tab became the active tab | rejected (first/last tab, browser not the active window, outdated extension), failed (tab not activated) |
 | Any | | unknown when the browser did not answer in time, disconnected, or control was disabled mid-action |
 
 ## Verification

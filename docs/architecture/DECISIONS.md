@@ -139,3 +139,39 @@ Each record states the decision, the alternatives considered and the trade-offs.
 * **Decision**: standard-library SQLite on a writer thread, one row per event category, local
   day stored with each event; no browsing or camera data. Enough for the approved daily
   statistics and future reports, without a reporting engine.
+
+## ADR-016 One four-direction index-swipe recognizer with a settle-based return phase
+
+* **Decision**: a single recognizer follows the pointing hand's index fingertip in 2D, commits
+  the direction (dominant axis) at the stroke start, rejects movements between the axes and
+  shares one threshold set for all directions. After a swipe, every opposite stroke is part of
+  the return until the fingertip is back near the start *and has paused* (or 1.2 s passed).
+* **Alternatives**: two axis recognizers (vertical finger, horizontal open hand) as in 0.2; a
+  position-only return rule; a long fixed cooldown; a resting "arming dwell" before strokes.
+* **Evidence**: replayed recordings - pointing swipes 8/8 at all presets and mirrored, 0 false
+  triggers in 190 s of negatives. The position-only rule produced a false opposite swipe at the
+  HIGH preset (multi-part, overshooting return; regression test). The arming dwell lost real
+  swipes (up 4/4 -> 3/4 at 0.1 s) without fixing back-and-forth ambiguity.
+* **Trade-off**: an opposite swipe right after a return needs a brief pause; preparation
+  movements made while already pointing remain ambiguous (GESTURES.md, verification pending).
+
+## ADR-017 Half-heart from image-space geometry, not a trained classifier
+
+* **Decision**: a curved, downward-hooking index, a downward thumb, separated tips and an
+  upright hand, held 0.6 s.
+* **Why**: no labeled half-heart data exists; explicit geometry is explainable, separates the
+  listed confusions (pointing, pinch, thumbs up, fist, sideways C) and can be tuned once the
+  Director's recording exists. A neural network would need data that is not available and
+  could not be validated.
+* **Trade-off**: a vertical C-shaped hand that happens to match the heart's geometry is
+  indistinguishable by construction; the hold and stillness requirements limit accidental use.
+
+## ADR-018 Tab navigation through the existing extension, gated on browser focus
+
+* **Decision**: tab switching is an extension command that activates the neighbouring tab of
+  the focused window, available only while the browser is the active application, with no
+  wrap-around and no new permissions.
+* **Alternatives**: synthetic Ctrl+Tab key presses (could reach whatever application has focus,
+  no confirmation), Windows application switching (removed from the product).
+* **Trade-off**: a user who focuses the Interactive Scrolling window cannot switch browser tabs
+  by gesture until the browser is focused again; this is intended.
