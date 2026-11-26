@@ -83,6 +83,7 @@ class BridgeServer:
         self._pending: dict[str, _Pending] = {}
         self._server: Server | None = None
         self._thread: threading.Thread | None = None
+        self._stopping = False
         self.error: str | None = None
         self.rejected_connections = 0
 
@@ -106,16 +107,28 @@ class BridgeServer:
             log.error("Browser bridge could not start: %s", self.error)
             return False
         self.error = None
+        self._stopping = False
         self._thread = threading.Thread(
-            target=self._server.serve_forever, name="browser-bridge", daemon=True
+            target=self._serve, args=(self._server,), name="browser-bridge", daemon=True
         )
         self._thread.start()
         log.info("Browser bridge listening on 127.0.0.1:%d", self.port)
         return True
 
+    def _serve(self, server: Server) -> None:
+        try:
+            server.serve_forever()
+        except OSError:
+            # On Windows, shutting down closes the listening socket while select() waits on
+            # it (WinError 10038). That is the expected end of an intentional stop.
+            if not self._stopping:
+                log.exception("Browser bridge stopped unexpectedly")
+                self.error = "bridge stopped unexpectedly"
+
     def stop(self) -> None:
         server, self._server = self._server, None
         if server is not None:
+            self._stopping = True
             server.shutdown()
         if self._thread is not None:
             self._thread.join(timeout=3)
@@ -124,6 +137,10 @@ class BridgeServer:
         for item in pending:
             item.error = "bridge stopped"
             item.event.set()
+
+    def set_change_listener(self, callback: Callable[[], None] | None) -> None:
+        """Called (from bridge threads) whenever a connection or its context changes."""
+        self._on_change = callback
 
     @property
     def listening(self) -> bool:

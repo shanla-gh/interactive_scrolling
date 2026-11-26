@@ -33,7 +33,7 @@ def server() -> Iterator[tuple[BridgeServer, YouTubeShortsController, list[bool]
     sessions: list[bool] = []
     bridge = BridgeServer(free_port(), TOKEN)
     controller = YouTubeShortsController(bridge, on_shorts_session=sessions.append)
-    bridge._on_change = controller.refresh  # mirror the application wiring
+    bridge.set_change_listener(controller.refresh)  # mirror the application wiring
     assert bridge.start()
     yield bridge, controller, sessions
     bridge.stop()
