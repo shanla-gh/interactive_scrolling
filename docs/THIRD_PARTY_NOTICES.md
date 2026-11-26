@@ -23,6 +23,23 @@ The model card lists the intended uses as *mobile AR, gesture recognition and ha
 and declares surveillance and identity recognition out of scope. This project uses the model
 only for local hand-control interaction, consistent with those terms.
 
+## Optional models (Brief 003)
+
+| Item | Selfie Segmenter (landscape) | Face Landmarker |
+|---|---|---|
+| File | `selfie_segmenter_landscape.tflite` (float16, version 1) | `face_landmarker.task` (float16, version 1: BlazeFace short range, Face Mesh V2, Blendshape V2) |
+| Source | `https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/1/selfie_segmenter_landscape.tflite` | `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task` |
+| SHA-256 | `490e9ea734313e0de10fa0cd9e3c6133e36ea4db2b7a49bde9ef019f72796b8e` (250,177 bytes) | `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff` (3,758,596 bytes) |
+| Publisher | Google (MediaPipe) | Google (MediaPipe) |
+| License | Apache License 2.0 (model card on Google AI Edge / Hugging Face `litert-community`, Nov 2026) | Apache License 2.0 (same source) |
+| Declared out of scope | surveillance and identity recognition | surveillance and identity recognition; the landmarks "do not provide facial recognition or identification" |
+
+Use in this project: the segmenter only makes the background of the Content Creator overlay
+transparent (presentation only); the face landmarker only drives the clown makeup and passive,
+aggregated eye estimates. No identification, no stored images or landmarks. Both are optional,
+downloaded with the hand model by `scripts/download_model.py`, and bundled in packaged builds
+together with this notice and the Apache 2.0 license text.
+
 ## Python packages (direct dependencies)
 
 | Package | Version | License |

@@ -1,120 +1,105 @@
 # interactive_scrolling
 
-Control your computer with natural hand gestures, using nothing but a standard laptop webcam.
-All computer vision runs locally on your machine.
+Hands-free YouTube Shorts and browser control with ordinary laptop webcam gestures, plus
+playful computer-vision effects, simple personal usage reports and a two-person co-op mode.
+Free and open source. All camera processing runs locally on your computer.
 
-> **Status: development build (v0.2.0.dev0).** Hand tracking, gesture recognition and
-> YouTube Shorts control work and are tested; live use with a real YouTube account is awaiting
-> the project owner's sign-off. Windows application switching, the content-creator overlay,
-> Anti-Doomscroll features and reports are planned and **not implemented yet**.
+> **Status: release candidate 0.3.0rc1 (not a stable release).** Everything below is
+> implemented and covered by automated tests; the Director's hands-on acceptance (real
+> gestures, real browser and account, two computers for co-op) is still pending. See
+> [PROJECT_STATUS.md](PROJECT_STATUS.md) for what is verified and what is not.
 
-## What it does today
+## Features
 
-* **Live webcam view** with an aligned hand skeleton, landmarks, bounding boxes, handedness
-  labels, motion trails and velocity arrows; camera selection, resolution and mirroring.
-* **Gesture recognition** (rule based, calibrated on recordings of real gestures):
+**Gestures** (either hand, rule based, calibrated on recordings):
 
-  | Gesture | How | Action |
-  |---|---|---|
-  | Swipe down | point with your index finger and move the whole hand down | Next Short |
-  | Swipe up | the same, upwards | Previous Short |
-  | Thumbs up | hold still about half a second | Like the Short |
-  | Stop | open hand, fingers up, palm to the camera, hold still | Pause / resume |
-  | Hand sweep left / right | open hand, big fast sweep | recognized only (app switching is planned) |
+| Gesture | Default action |
+|---|---|
+| Index finger swipe down / up (point and move) | Next / previous YouTube Short |
+| Index finger swipe right / left | Next / previous tab of the active browser window |
+| Half-heart (one half of a two-handed heart), held | Like the Short |
+| Open palm, held | Pause / resume |
 
-* **Safe control modes**: *Tracking only* (default), *Gesture test* (gestures shown, nothing
-  executed) and *Live control* (explicitly enabled). Emergency stop with the *Disable* button,
-  Esc, or **Ctrl+Alt+D** anywhere in Windows.
-* **YouTube Shorts control** in Microsoft Edge or Google Chrome through a small companion
-  extension: next, previous, like (never unlikes) and pause/resume, each confirmed from the page
-  and reported as succeeded, no change, rejected, failed or unknown.
-* **Gesture history and daily statistics** (gestures, successful actions, rejections, time a
-  Shorts tab was visible), stored only on your computer, with an opt-out and a clear button.
-* **Settings**: sensitivity presets, thresholds, enabled gestures, control hand, gesture-to-action
-  mapping; saved between sessions.
-* **Diagnostics** from measured state: FPS, latency, dropped frames, CPU, memory, activity log.
+Safe control modes (*Tracking only*, *Gesture test*, *Live control*), an emergency stop
+(button, Esc, **Ctrl+Alt+D** anywhere), sensitivity presets, per-gesture on/off and mapping.
+Every action is confirmed from the page and reported as succeeded, no change, rejected, failed
+or unknown.
 
-## Requirements
+**Three UI modes**: *Developer Mode* (dashboard with skeleton, vectors, diagnostics, history,
+reports), *Content Creator Mode* (compact always-on-top overlay for OBS, optional
+**transparent background**), *Background Mode* (tray icon that always shows the camera and
+control state).
 
-* Windows 10/11 x64 with a webcam (developed and tested on Windows 11).
-* Python 3.12 with the `py` launcher.
-* For YouTube control: Microsoft Edge or Google Chrome.
+**Wellbeing and reports** (local only, can be switched off and deleted): today's scrolling
+time, sessions, longest session, actions, gestures, a transparent **Doomscroll Index**,
+optional Reality Checks, limits and a reversible pause of gesture scrolling; a Gesture
+Performance Report.
 
-## Installation
+**Fun**: the **Progressive Clown Transformation** (red nose -> makeup -> full clown as a
+scrolling session goes on), optional **passive eye analytics** (estimated screen-facing /
+looking-away time, blinks; never used for control), **Doomscroll Wrapped** (1080x1920 PNG
+summary for stories), **Co-op Doomscroll** (two people on the same network control one feed).
+
+## Install (from source)
+
+Requirements: Windows 10/11 x64, a webcam, Python 3.12 (`py` launcher), Microsoft Edge or
+Google Chrome for browser control.
 
 ```powershell
 git clone https://github.com/shanla-gh/interactive_scrolling.git
 cd interactive_scrolling
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
-```
-
-The setup script creates `.venv\`, installs the pinned dependencies and downloads the hand
-landmark model (~7.8 MB, verified by SHA-256). This is the only step that needs the internet.
-
-### Browser extension (for YouTube control)
-
-1. Start the app and open its **YouTube** tab; copy the pairing code.
-2. Open `edge://extensions` (or `chrome://extensions`), enable **Developer mode**, choose
-   **Load unpacked** and select the `browser_extension` folder of this repository.
-3. Click the extension icon, paste the pairing code and choose **Save and connect**.
-
-Details and the security model: [docs/architecture/YOUTUBE_INTEGRATION.md](docs/architecture/YOUTUBE_INTEGRATION.md).
-
-## Usage
-
-```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1     # venv, dependencies, models
 scripts\run.ps1
 ```
 
-Click **Start camera**, choose **Gesture test** to practise (see the gesture banner and the
-history), then open a YouTube Shorts page and choose **Live control**. Gesture details and
-limitations: [docs/architecture/GESTURES.md](docs/architecture/GESTURES.md).
+`setup.ps1` downloads the three MediaPipe models once (~11.8 MB in total, verified by SHA-256);
+after that everything works offline. A packaged build is described in
+[docs/RELEASE.md](docs/RELEASE.md).
 
-Useful options: `--camera N`, `--resolution 1280x720`, `--no-mirror`, `--auto-start`,
-`--max-hands 1`, `--backend dshow`, `--allow-power-throttling`.
+### Browser extension
+
+1. In the app's **Browser** tab, copy the pairing code.
+2. `edge://extensions` (or `chrome://extensions`) -> *Developer mode* -> *Load unpacked* ->
+   select the `browser_extension` folder. (Updating from 0.2: press *Reload* on its card.)
+3. Click the extension icon, paste the code, *Save and connect*.
+
+## Use
+
+1. **Start camera**, choose **Gesture test**, practise the gestures (nothing is executed).
+2. Open a YouTube Shorts tab, choose **Live control**.
+3. Optional: *Creator overlay*, *To tray*, *Today* tab (reports, limits, Wrapped, face
+   effects), *Co-op* tab.
+
+A step-by-step guide with every feature is the
+[Director acceptance checklist](docs/milestones/DIRECTOR_ACCEPTANCE_CHECKLIST.md).
+
+## Privacy
+
+* Camera frames never leave the computer and are never written to disk; no cloud services, no
+  telemetry, no accounts.
+* The browser extension reads only YouTube pages; tab switching uses tab positions, never
+  titles or URLs.
+* Statistics contain event categories and durations only (no URLs, titles, video ids, faces or
+  landmarks); eye analytics store daily totals only. Switch off and delete in the *Today* tab.
+* No face identification; face landmarks are used only for the clown effect and eye estimates.
+* Co-op sends only small signed control events (next, previous, pause) on your own network.
 
 ## Development
 
 ```powershell
-scripts\test.ps1                 # format check, lint, all hardware-independent tests
-scripts\test.ps1 -Hardware       # additionally the physical webcam tests
-.venv\Scripts\python.exe -m pytest --live-youtube tests\live          # real website (opt-in)
-.venv\Scripts\python.exe scripts\stability_session.py --minutes 10
-.venv\Scripts\python.exe scripts\record_gestures.py      # labeled calibration recording
-.venv\Scripts\python.exe scripts\evaluate_gestures.py recordings\<file>.json
+scripts\test.ps1              # format, lint, all hardware-independent tests
+scripts\test.ps1 -Hardware    # including the physical webcam tests
+.venv\Scripts\python.exe -m pytest tests\live --live-youtube   # optional, real website
 ```
 
-Read [docs/ENGINEERING_CONVENTIONS.md](docs/ENGINEERING_CONVENTIONS.md) first. Architecture:
-[docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md). Current state:
-[PROJECT_STATUS.md](PROJECT_STATUS.md).
-
-## Technology
-
-Python 3.12 · MediaPipe Tasks 1.2.3 · OpenCV 4.12 · NumPy 2.2 · PySide6 / Qt 6.10 · websockets
-15 · SQLite · psutil · Manifest V3 browser extension · pytest, pytest-qt, ruff.
-
-## Privacy
-
-* Video is processed in memory on your computer and discarded frame by frame; nothing is
-  recorded, uploaded or sent anywhere, and there is no telemetry.
-* The camera opens only when you click *Start camera* or *Scan*.
-* The browser connection is local only (127.0.0.1), restricted to this project's extension and a
-  pairing code; the extension can only see youtube.com pages and only performs four actions.
-* Statistics contain event types, outcomes and timings only: no page addresses, titles, video
-  ids, account data or camera data. They can be disabled and cleared.
-* No account credentials are used; the extension acts in your normal browser session.
-
-## Known limitations
-
-* Tested on one Windows 11 laptop and one built-in webcam; gestures calibrated on one person.
-* Hand sweeps are recognized unreliably for small movements; holding an open hand still for
-  0.8 s counts as a stop gesture.
-* YouTube control depends on YouTube's current page structure; if it changes, actions are
-  reported as failed or unknown rather than successful.
-* Chrome needs the extension loaded manually; Firefox is not supported.
-* Cameras are listed by index, not by name.
+Documentation: [architecture](docs/architecture/ARCHITECTURE.md),
+[gestures](docs/architecture/GESTURES.md), [browser](docs/architecture/YOUTUBE_INTEGRATION.md),
+[reports](docs/architecture/REPORTING.md), [UI and effects](docs/architecture/UI_AND_EFFECTS.md),
+[co-op](docs/architecture/COOP.md), [decisions](docs/architecture/DECISIONS.md),
+[conventions](docs/ENGINEERING_CONVENTIONS.md), [roadmap](ROADMAP.md),
+[changelog](CHANGELOG.md).
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Third-party components and the MediaPipe model (Apache 2.0):
+MIT, see [LICENSE](LICENSE). Third-party components and models:
 [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).

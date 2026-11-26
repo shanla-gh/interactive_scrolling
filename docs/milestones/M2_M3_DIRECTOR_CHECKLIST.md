@@ -1,5 +1,8 @@
 # Director checklist: gestures and YouTube Shorts (M2 + M3)
 
+> **Superseded** by [DIRECTOR_ACCEPTANCE_CHECKLIST.md](DIRECTOR_ACCEPTANCE_CHECKLIST.md)
+> (Brief 003). Thumbs up and open-hand sweeps no longer exist; use the new checklist.
+
 About 15 minutes. Record pass / fail and short notes in `PROJECT_STATUS.md` (or send them).
 
 ## 1. Start

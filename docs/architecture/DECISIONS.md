@@ -175,3 +175,40 @@ Each record states the decision, the alternatives considered and the trade-offs.
   no confirmation), Windows application switching (removed from the product).
 * **Trade-off**: a user who focuses the Interactive Scrolling window cannot switch browser tabs
   by gesture until the browser is focused again; this is intended.
+
+## ADR-019 Optional models as frame taps with read-only views
+
+* **Decision**: segmentation and face landmarks run in their own workers fed after hand
+  tracking through non-blocking single-slot mailboxes, with a read-only view of the frame, a
+  15 FPS limit and lazy model loading; disabled workers hold no model.
+* **Why**: the brief requires that background removal never alters the gesture input and that
+  optional effects never slow primary control. A read-only view makes accidental modification
+  an error; the mailbox drops frames instead of queueing.
+* **Trade-off**: results lag the displayed frame by up to one inference (~10-40 ms); masks and
+  faces older than 0.5 s are not used.
+
+## ADR-020 Hide the camera when transparency has no fresh mask
+
+* **Decision**: with transparent background on and no fresh mask (model missing, failed,
+  stale), the overlay draws no camera image and shows a notice.
+* **Why**: showing the unmasked frame would reveal the room unexpectedly, which the brief
+  forbids. Skeleton and feedback stay visible.
+
+## ADR-021 Procedural clown artwork and coarse eye states
+
+* **Decision**: original QPainter artwork anchored to face-mesh landmarks (no image assets);
+  eye analytics limited to screen / away / unknown, blinks and quality, with an optional
+  one-point calibration.
+* **Why**: no licensing questions, follows expressions, cheap. A webcam cannot deliver precise
+  gaze; multi-point calibration and regression would claim precision that cannot be validated.
+
+## ADR-022 Co-op as signed control events into the Host's dispatcher
+
+* **Decision**: WebSocket with code-derived mutual HMAC authentication and signed, sequenced
+  messages; Guest requests run through the Host's dispatcher; the Guest's dispatcher uses a
+  forwarding controller.
+* **Alternatives**: TLS with certificate pinning (heavier setup, nothing confidential to
+  protect), a relay server (out of scope: no backend), sharing the Host's extension pairing
+  code (would give the Guest full browser control).
+* **Trade-off**: traffic is readable on the local network; only authenticated, approved, shared
+  actions can be executed.

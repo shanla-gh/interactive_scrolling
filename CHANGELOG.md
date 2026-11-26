@@ -4,7 +4,43 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] - 0.2.0.dev0
+## [0.3.0rc1] - release candidate (not released; Director acceptance pending)
+
+### Added
+
+- Four-direction index-finger swipes (one recognizer, either hand, diagonals rejected,
+  settle-based return-movement suppression) and the single-hand half-heart like gesture.
+- Browser tab navigation (next/previous tab of the focused window, no wrap-around, no new
+  extension permissions); protocol version 2, extension 0.3.0.
+- Content Creator Mode (always-on-top, non-activating overlay for OBS) with optional
+  transparent background from local person segmentation; Background Mode (tray); visual
+  customization; all modes share one runtime.
+- Scrolling session accounting, Daily Activity Report, Gesture Performance Report, Doomscroll
+  Index, optional Reality Checks, limits, break reminders and a reversible gesture-scrolling
+  pause.
+- Progressive Clown Transformation (procedural AR makeup from face landmarks) and optional
+  passive eye analytics with calibration and a Visual Behavior Report.
+- Doomscroll Wrapped (daily, session and co-op 1080x1920 PNG cards).
+- Minimal two-person Co-op Doomscroll over a private network (authenticated, host-approved,
+  shared next/previous/pause only).
+- UI stall monitor with handler, GC and worker attribution; `--self-test`; Windows packaging
+  with PyInstaller; recorder session 3 and per-gesture benchmark reports.
+
+### Changed
+
+- Gesture names and defaults (Brief 003): thumbs up and open-hand sweeps replaced; academic
+  application switching removed. Settings files are migrated (with a backup) and version 0.2
+  statistics are kept.
+
+### Fixed
+
+- ~13 ms UI-thread block every second from system-wide thread enumeration.
+- False opposite swipe from a multi-part, overshooting return movement (HIGH preset).
+- Reading a fresh statistics database reported an error until the first event.
+- Two timing races in tests (browser reconnect, queued panel update).
+
+## [0.2.0.dev0]
+
 
 ### Added
 

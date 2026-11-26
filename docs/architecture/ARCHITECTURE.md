@@ -1,6 +1,6 @@
 # Architecture
 
-Version 0.2.0.dev0 (Milestones 0-3).
+Version 0.3.0rc1 (Milestones 0-11, Engineering Brief 003).
 
 ## Data flow
 
@@ -8,34 +8,24 @@ Version 0.2.0.dev0 (Milestones 0-3).
 Physical webcam
     |  cv2.VideoCapture (Media Foundation)                 vision/camera.py
     v
-Capture thread ── Frame(BGR, index, perf_counter_ns) ──>  core/mailbox.py
-    |                     single-slot "latest value" mailbox (drops stale frames)
+Capture thread ── Frame(BGR, index, perf_counter_ns) ──>  core/mailbox.py (latest value)
     v
 Processing thread                                          core/pipeline.py
-    |  BGR -> RGB (once)
-    |  HandTracker.process(rgb, timestamp_ms)              vision/hand_tracker.py (MediaPipe VIDEO mode)
+    |  BGR -> RGB (once); HandTracker.process (original, unmodified frame)
+    |  MotionAnalyzer -> GestureEngine (four index swipes, half-heart, stop)
+    |      confirmed GestureEvent -> ActionDispatcher (own thread)        actions/
+    |          admission checks (Anti-Doomscroll pause, co-op shared cooldown)
+    |          -> controller: browser extension bridge (Shorts, tabs)     integrations/youtube/
+    |             or, as co-op Guest, the Host over the co-op link        integrations/coop/
+    |  frame taps (after tracking, read-only view, never blocking):
+    |      segmentation worker (creator transparency)   vision/segmenter.py  core/auxiliary.py
+    |      face worker (clown, eye analytics)           vision/face_tracker.py
     v
-TrackingResult(hands: HandObservation[21x3] + handedness)  vision/landmarks.py
-    |
-    v
-MotionAnalyzer.update(tracking) -> MotionFrame             motion/analyzer.py
-    |
-    v
-GestureEngine.update(tracking, motion) -> GestureFrame     gestures/ (control hand, recognizers)
-    |  confirmed GestureEvent (not coalesced)
-    +──> ActionDispatcher (own thread)                       actions/dispatcher.py
-            mode / mapping / staleness / one-at-a-time
-            -> YouTubeShortsController -> BridgeServer       integrations/youtube/
-               -> loopback WebSocket -> browser extension    browser_extension/
-               -> confirmed outcome -> history, analytics    storage/analytics.py
-    |
-ProcessedFrame ──> PipelineListener (worker thread)
-    |  PipelineBridge: coalesces frames, emits Qt signals  ui/bridge.py
-    v
-UI thread: MainWindow -> VideoView.paintEvent              ui/main_window.py, ui/video_view.py
-    |  ViewTransform (letterbox + mirror)                  visualization/geometry.py
-    v  OverlayRenderer (QPainter)                          visualization/overlay.py
-Screen
+ProcessedFrame ──> PipelineBridge (coalescing) ──> UI thread                ui/
+    Developer window (VideoView), Content Creator overlay, tray icon: views of one runtime
+Services activity thread (1 Hz)                                            services.py
+    scrolling activity -> sessions (wellbeing/), reminders, cached reports, eye aggregates
+    -> SQLite writer thread                                                storage/analytics.py
 ```
 
 ## Packages and responsibilities
@@ -43,80 +33,60 @@ Screen
 | Package | Responsibility | May depend on |
 |---|---|---|
 | `config` | Typed, validated settings dataclasses | standard library only |
-| `core` | Clock/rate meters, mailbox, threaded pipeline, process diagnostics, OS tuning | `config`, `vision`, `motion` (no Qt, no MediaPipe) |
-| `vision` | Camera acquisition, landmark data model, MediaPipe adapter, model assets | `config`, `core.timing` (no Qt) |
-| `motion` | Timestamp-based displacement/velocity/direction, smoothing, trails | `config`, `vision.landmarks` (no Qt, no OpenCV) |
-| `visualization` | Source-to-view geometry (pure) and QPainter overlay renderer | `vision`, `motion`, `config`, QtGui |
-| `gestures` | Pose analysis, recognizers, gesture engine (no actions) | `config`, `core.timing`, `vision`, `motion` |
+| `core` | Timing, mailbox, pipeline, optional inference workers, stall monitor, diagnostics | `config`, `vision`, `motion`, `gestures` (no Qt, no MediaPipe) |
+| `vision` | Camera, landmark model, MediaPipe adapters (hands, segmentation, face), model assets, transparency compositing | `config`, `core.timing` (no Qt) |
+| `motion` | Displacement/velocity/direction, smoothing, trails | `config`, `vision.landmarks` |
+| `visualization` | View geometry and QPainter renderers (overlay, clown) | `vision`, `motion`, `config`, QtGui (no OpenCV) |
+| `gestures` | Pose analysis, recognizers, gesture engine | `config`, `core.timing`, `vision`, `motion` |
 | `actions` | Control modes, mapping, dispatcher, controller interface | `gestures`, `config`, `core.timing` |
-| `integrations/youtube` | Bridge server, protocol, YouTube controller | `actions`, `core.timing` |
-| `storage` | Settings store, analytics store | `config`, `actions`, `gestures` |
-| `services` | Composition of engine, dispatcher, bridge, analytics, settings | all non-UI packages |
-| `ui` | Qt Widgets window, panels, theme, worker-to-UI bridge | everything above |
+| `integrations/youtube` | Extension bridge, protocol, browser controller | `actions`, `core.timing` |
+| `integrations/coop` | Co-op protocol, host, guest | `actions`, `gestures`, `vision.landmarks` |
+| `storage` | Settings store (with migration), analytics store | `config`, `actions`, `gestures` |
+| `wellbeing` | Sessions, reports, Doomscroll Index, reminders, eye analytics (pure logic) | `config`, `storage`, `vision.face_tracker` data types |
+| `services` | Composition of engine, dispatcher, bridge, analytics, wellbeing, co-op | all non-UI packages |
+| `ui` | Qt windows, panels, overlay, tray, dialogs, Wrapped | everything above |
 | `app` | Argument parsing, logging, object wiring, entry point | everything |
 
-These boundaries are enforced by `tests/unit/test_architecture.py`, which also asserts that
-MediaPipe is imported only by `vision/hand_tracker.py`.
+Boundaries are enforced by `tests/unit/test_architecture.py`; MediaPipe is imported only by the
+three adapters in `vision/` (`hand_tracker.py`, `segmenter.py`, `face_tracker.py`).
 
 ## Threads and ownership
 
 | Thread | Lifetime | Owns |
 |---|---|---|
-| UI (main) | application | all Qt objects, `VideoView`, panels, timers |
-| `vision-processing` | `VisionPipeline.launch()` .. `shutdown()` | `MotionAnalyzer`, the active `HandTracker` |
-| `tracker-loader` | until the model is loaded | creates the `HandTracker`, then hands it to the processing thread |
-| `camera-capture-N` | one per camera session | the `OpenCVCamera` (opened and released on this thread) |
-| `camera-scan` | one per user-initiated scan | temporary capture devices |
+| UI (main) | application | Qt objects, both windows, tray, timers |
+| `vision-processing` | application | motion analyzer, hand tracker, gesture engine |
+| `tracker-loader` | until loaded | creates the hand tracker |
+| `camera-capture-N` | one per camera session | the camera device |
+| `aux-segmentation`, `aux-face landmarks` | application (idle while disabled) | their model, loaded only while enabled |
 | `action-dispatcher` | application | queued action, controller calls |
-| `browser-bridge` + per-connection threads | application | WebSocket server and connections |
+| `browser-bridge` + connection threads | application | extension WebSocket server |
+| `coop-host` / `coop-guest`, `coop-ping` | while a co-op session exists | co-op connection |
+| `activity` | application | activity tracker, reminders, cached reports |
 | `analytics-writer` | application | SQLite connection |
+| `stall-monitor` | application | UI stall watchdog |
 
-Cross-thread communication uses only: the frame mailbox (capture -> processing), the
-listener callbacks (processing/capture -> bridge), and Qt queued signals (bridge -> UI).
-The bridge coalesces frames so the UI event queue never accumulates frames.
+Cross-thread data: immutable records, lock-protected state, single-slot mailboxes and Qt queued
+signals. Presentation modes (Developer, Content Creator, Background) only show or hide windows;
+they never start or stop the camera, the models, the dispatcher or the bridge, and the global
+emergency shortcut works in every mode.
 
 ## Lifecycle
 
-* **Start camera**: increments the session number, spawns a capture thread; the thread opens
-  the device and reports `RUNNING`, or `ERROR` with a user-readable message.
-* **Stop camera**: non-blocking. Sets the session's stop event; the capture thread releases
-  the device and reports `STOPPED`. The UI clears the image and overlay and ignores late
-  frames from the stopped session.
-* **Shutdown** (window close): stops the camera, stops the processing thread, joins all
-  threads (5 s timeout each) and closes the tracker.
-* **Failures**: an unopenable camera, a camera that delivers no frames (30 consecutive read
-  failures) and unexpected exceptions all end the session with `ERROR`; the user can retry.
-  A missing model leaves the preview working with tracking marked unavailable. Ten
-  consecutive inference failures disable tracking without stopping the preview.
+* Start / stop camera: as in 0.2 (non-blocking stop, session numbers discard late frames).
+* Optional workers: enabled when their feature is on and visible (transparent overlay shown,
+  clown or eye analytics enabled); disabling closes the model.
+* Shutdown (main window close, tray or overlay *Quit*): emergency disable, overlay and tray
+  closed, workers shut down, pipeline shut down (camera released), co-op left/ended, activity
+  interval closed, eye aggregates flushed, analytics closed, then the process exits.
 
-## Coordinate systems
+## Coordinates and timestamps
 
-| Space | Definition | Used by |
-|---|---|---|
-| Normalized source | `x, y` in [0, 1] of the **unmirrored** frame, origin top-left, y down | `HandObservation.landmarks` |
-| Source pixels | normalized x width/height | motion analysis (isotropic distances) |
-| View | widget pixels after letterboxing and optional mirroring | rendering only |
+Unchanged: landmarks in normalized coordinates of the unmirrored frame; mirroring is display
+only (`ViewTransform`); timestamps are `perf_counter_ns`; reports use wall-clock seconds.
 
-Inference always runs on the unmirrored frame, so handedness is the user's real hand
-(MediaPipe documents that mirrored input inverts handedness; this is verified by
-`tests/integration/test_mediapipe_tracker.py`). Mirroring is applied only by
-`ViewTransform` and, for direction labels, by `Direction.mirrored()`.
+## Related documents
 
-## Timestamps and units
-
-* Timestamps: integer nanoseconds from `time.perf_counter_ns()` (QueryPerformanceCounter),
-  taken immediately after each frame is read. `time.monotonic()` is not used because its
-  resolution on Windows is 15.6 ms.
-* MediaPipe receives `timestamp_ns // 1e6` (ms), forced strictly increasing.
-* Velocities: px/s (source pixels) and palm lengths per second, where one palm length is the
-  measured wrist to middle-finger-MCP distance. No metric (m/s) velocities are reported.
-* Latency: capture timestamp to end of processing, in ms.
-
-## Motion analysis
-
-See the module docstring of `motion/analyzer.py`. Summary: time-constant exponential
-smoothing of positions (tau = 40 ms) and velocities (tau = 60 ms); moving/stationary
-classification with hysteresis (0.6 / 0.35 palms/s); greedy nearest-neighbour track
-association by palm position with a handedness penalty; tracks discarded after 250 ms
-without observations; jumps over 3 palm lengths restart a track. Eight-way direction
-classification in 45-degree sectors.
+[GESTURES.md](GESTURES.md), [YOUTUBE_INTEGRATION.md](YOUTUBE_INTEGRATION.md),
+[REPORTING.md](REPORTING.md), [COOP.md](COOP.md), [UI_AND_EFFECTS.md](UI_AND_EFFECTS.md),
+[DECISIONS.md](DECISIONS.md).
