@@ -231,5 +231,15 @@ class OverlayRenderer:
             direction = point_motion.display_direction(transform.mirrored)
             text = f"{direction.arrow} {point_motion.speed_palms_s:.1f} palms/s"
             painter.setFont(self._label_font)
+            metrics = QFontMetricsF(self._label_font)
+            box = QRectF(0, 0, metrics.horizontalAdvance(text) + 10, metrics.height() + 4)
+            # Place the label beyond the arrow head, on the side it points to.
+            anchor = QPointF(tip.x() + 10 * ux, tip.y() + 10 * uy)
+            box.moveCenter(
+                QPointF(anchor.x() + ux * box.width() / 2, anchor.y() + uy * box.height() / 2)
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(_color(palette.BACKGROUND, 200))
+            painter.drawRoundedRect(box, 4, 4)
             painter.setPen(_color(color))
-            painter.drawText(QPointF(tip.x() + 8 * ux + 6, tip.y() + 8 * uy + 4), text)
+            painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
