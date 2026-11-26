@@ -35,6 +35,8 @@ import numpy as np
 from interactive_scrolling.config.settings import CameraSettings, MotionSettings
 from interactive_scrolling.core.mailbox import LatestValueMailbox
 from interactive_scrolling.core.timing import NS_PER_MS, Clock, RateMeter, RollingStats, now_ns
+from interactive_scrolling.gestures.engine import GestureEngine
+from interactive_scrolling.gestures.types import GestureEvent, GestureFrame
 from interactive_scrolling.motion.analyzer import MotionAnalyzer, MotionFrame
 from interactive_scrolling.vision.camera import CameraError, CameraReadError, Frame
 from interactive_scrolling.vision.hand_tracker import HandTracker
@@ -83,6 +85,9 @@ class ProcessedFrame:
     completed_ns: int
     inference_ms: float | None
     processing_ms: float
+    gestures: GestureFrame | None = None
+    gesture_ms: float | None = None
+    """Time spent in gesture recognition for this frame."""
 
     @property
     def latency_ms(self) -> float:
@@ -135,12 +140,19 @@ class VisionPipeline:
         max_consecutive_inference_failures: int = 10,
         clock: Clock = now_ns,
         inference_max_width: int | None = None,
+        gesture_engine: GestureEngine | None = None,
+        on_gesture_event: Callable[[GestureEvent], None] | None = None,
     ) -> None:
         self._listener = listener
         self._inference_max_width = inference_max_width
         self._camera_factory = camera_factory
         self._tracker_factory = tracker_factory
         self._analyzer = MotionAnalyzer(motion_settings)
+        self._gesture_engine = gesture_engine
+        self._on_gesture_event = on_gesture_event
+        self._gestures_enabled = False
+        self._gesture_reset_requested = False
+        self._gesture_stats = RollingStats(120)
         self._max_read_failures = max(1, max_consecutive_read_failures)
         self._max_inference_failures = max(1, max_consecutive_inference_failures)
         self._clock = clock
@@ -367,6 +379,8 @@ class VisionPipeline:
                 if item.session != current_session:
                     current_session = item.session
                     self._analyzer.reset()
+                    if self._gesture_engine is not None:
+                        self._gesture_engine.reset()
                 frame = item.frame
                 started = self._clock()
                 image_rgb = cv2.cvtColor(frame.image_bgr, cv2.COLOR_BGR2RGB)
@@ -400,6 +414,7 @@ class VisionPipeline:
                     inference_ms=inference_ms,
                 )
                 motion = self._analyzer.update(tracking)
+                gestures, gesture_ms = self._recognize(tracking, motion)
                 completed = self._clock()
                 processed = ProcessedFrame(
                     session=item.session,
@@ -410,6 +425,8 @@ class VisionPipeline:
                     completed_ns=completed,
                     inference_ms=inference_ms,
                     processing_ms=(completed - started) / NS_PER_MS,
+                    gestures=gestures,
+                    gesture_ms=gesture_ms,
                 )
                 self._frames_processed += 1
                 self._processing_rate.tick(completed)
@@ -422,6 +439,47 @@ class VisionPipeline:
                 tracker = loaded[0] if loaded else None
             if tracker is not None:
                 self._close_tracker(tracker)
+
+    # ------------------------------------------------------------------ gestures
+
+    def set_gestures_enabled(self, enabled: bool) -> None:
+        """Turn gesture recognition on or off. Thread-safe; any change resets the engine so no
+        half-finished candidate survives a mode switch."""
+        with self._lock:
+            if enabled != self._gestures_enabled:
+                self._gestures_enabled = enabled
+                self._gesture_reset_requested = True
+
+    @property
+    def gesture_ms_mean(self) -> float | None:
+        return self._gesture_stats.mean()
+
+    def _recognize(
+        self, tracking: TrackingResult, motion: MotionFrame
+    ) -> tuple[GestureFrame | None, float | None]:
+        engine = self._gesture_engine
+        if engine is None:
+            return None, None
+        with self._lock:
+            enabled = self._gestures_enabled
+            reset, self._gesture_reset_requested = self._gesture_reset_requested, False
+        if reset:
+            engine.reset()
+        if not enabled:
+            return None, None
+        t0 = self._clock()
+        try:
+            frame = engine.update(tracking, motion)
+        except Exception:
+            log.exception("Gesture recognition failed; engine reset")
+            engine.reset()
+            return None, None
+        elapsed = (self._clock() - t0) / NS_PER_MS
+        self._gesture_stats.add(elapsed)
+        if self._on_gesture_event is not None:
+            for event in frame.events:
+                self._safe_call(self._on_gesture_event, event)
+        return frame, elapsed
 
     def _inference_input(self, image_rgb: np.ndarray) -> np.ndarray:
         """Optionally downscale the frame for inference (landmarks are normalized)."""
