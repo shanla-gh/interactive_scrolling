@@ -50,6 +50,8 @@ ACTION_TIMEOUT_S = {
     ActionType.PREVIOUS_SHORT: 3.0,
     ActionType.LIKE_SHORT: 3.0,
     ActionType.TOGGLE_PLAYBACK: 2.0,
+    ActionType.NEXT_BROWSER_TAB: 2.0,
+    ActionType.PREVIOUS_BROWSER_TAB: 2.0,
 }
 
 

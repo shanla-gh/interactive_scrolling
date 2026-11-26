@@ -172,23 +172,18 @@ _PRESET_SCALES = {
     SensitivityPreset.HIGH: 0.8,
 }
 _SCALED_FIELDS = (
-    "finger_swipe_min_distance_palms",
-    "finger_swipe_min_speed_palms_s",
-    "hand_sweep_min_distance_palms",
-    "hand_sweep_min_speed_palms_s",
-    "thumbs_up_hold_s",
+    "swipe_min_distance_palms",
+    "swipe_min_speed_palms_s",
+    "half_heart_hold_s",
     "stop_hold_s",
 )
 
 _RANGES: dict[str, tuple[float, float]] = {
-    "finger_swipe_min_distance_palms": (0.3, 3.0),
-    "finger_swipe_min_speed_palms_s": (0.5, 10.0),
-    "finger_swipe_max_duration_s": (0.2, 2.0),
-    "hand_sweep_min_distance_palms": (0.5, 5.0),
-    "hand_sweep_min_speed_palms_s": (0.5, 12.0),
-    "hand_sweep_max_duration_s": (0.2, 2.0),
+    "swipe_min_distance_palms": (0.3, 3.0),
+    "swipe_min_speed_palms_s": (0.5, 10.0),
+    "swipe_max_duration_s": (0.2, 2.0),
     "direction_ratio": (1.0, 5.0),
-    "thumbs_up_hold_s": (0.1, 3.0),
+    "half_heart_hold_s": (0.1, 3.0),
     "stop_hold_s": (0.1, 3.0),
     "static_max_speed_palms_s": (0.1, 3.0),
     "cooldown_s": (0.0, 5.0),
@@ -199,32 +194,43 @@ _RANGES: dict[str, tuple[float, float]] = {
     "min_track_age_s": (0.0, 2.0),
 }
 
+GESTURE_ENABLE_FIELDS = (
+    "enable_swipe_down",
+    "enable_swipe_up",
+    "enable_swipe_left",
+    "enable_swipe_right",
+    "enable_half_heart",
+    "enable_stop",
+)
+
 
 @dataclass(frozen=True)
 class GestureSettings:
     """Gesture recognition thresholds. Distances and speeds are in palm lengths.
 
     One palm length is the measured wrist to middle-finger-MCP distance, so thresholds do not
-    depend on how far the hand is from the camera.
+    depend on how far the hand is from the camera. The four index swipes share one set of
+    thresholds (see docs/architecture/GESTURES.md for why).
     """
 
     preset: SensitivityPreset = SensitivityPreset.BALANCED
-    finger_swipe_min_distance_palms: float = 0.8
-    finger_swipe_min_speed_palms_s: float = 2.0
-    finger_swipe_max_duration_s: float = 0.7
-    hand_sweep_min_distance_palms: float = 0.75
-    hand_sweep_min_speed_palms_s: float = 2.8
-    hand_sweep_max_duration_s: float = 0.9
+    swipe_min_distance_palms: float = 0.8
+    """Fingertip travel along the swipe direction."""
+    swipe_min_speed_palms_s: float = 2.0
+    """Peak fingertip speed along the swipe direction."""
+    swipe_max_duration_s: float = 0.7
     direction_ratio: float = 1.8
-    """The main axis must exceed the cross axis by this factor (1.8 = within ~29 degrees)."""
-    thumbs_up_hold_s: float = 0.6
+    """The main axis must exceed the cross axis by this factor (1.8 = within ~29 degrees);
+    movements between the axes are rejected rather than assigned to a direction."""
+    half_heart_hold_s: float = 0.6
     stop_hold_s: float = 0.8
     static_max_speed_palms_s: float = 0.6
-    cooldown_s: float = 0.6
-    """Minimum time before the same gesture can be confirmed again."""
-    return_window_s: float = 1.0
-    """After a swipe, an opposite-direction swipe starting within this time after the swipe's
-    movement ended is treated as the hand's return movement and ignored."""
+    cooldown_s: float = 0.5
+    """Minimum time after a swipe before the next swipe can be confirmed."""
+    return_window_s: float = 1.2
+    """After a swipe, an opposite stroke that starts within this time after the swipe's
+    movement ended, while the hand is still away from where the swipe started, is the hand's
+    return movement and is ignored."""
     global_cooldown_s: float = 0.4
     """After any confirmed gesture, no other gesture is confirmed for this time."""
     rearm_still_s: float = 0.0
@@ -234,9 +240,11 @@ class GestureSettings:
     rearm_max_speed_palms_s: float = 1.0
     min_track_age_s: float = 0.3
     control_hand: ControlHandPreference = ControlHandPreference.AUTO
-    enable_finger_swipes: bool = True
-    enable_hand_sweeps: bool = True
-    enable_thumbs_up: bool = True
+    enable_swipe_down: bool = True
+    enable_swipe_up: bool = True
+    enable_swipe_left: bool = True
+    enable_swipe_right: bool = True
+    enable_half_heart: bool = True
     enable_stop: bool = True
 
     def __post_init__(self) -> None:

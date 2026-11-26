@@ -32,14 +32,13 @@ from interactive_scrolling.config.settings import ControlHandPreference, Gesture
 from interactive_scrolling.core.timing import NS_PER_S
 from interactive_scrolling.gestures.pose import analyze_pose
 from interactive_scrolling.gestures.recognizers import (
+    DirectionalSwipeRecognizer,
     HandSample,
     StaticPoseRecognizer,
     Step,
-    SwipeRecognizer,
-    open_hand,
+    half_heart,
     pointing,
     stop_pose,
-    thumbs_up,
 )
 from interactive_scrolling.gestures.types import (
     ControlStatus,
@@ -83,58 +82,50 @@ class GestureEngine:
 
     def _build(self) -> None:
         s = self._settings
-        self.finger = SwipeRecognizer(
-            "finger",
-            GestureType.FINGER_SWIPE_DOWN,
-            GestureType.FINGER_SWIPE_UP,
-            horizontal=False,
-            use_palm=False,
-            pose_ok=pointing,
-            pose_fraction=0.6,
-            settings=s,
-        )
-        self.hand = SwipeRecognizer(
-            "hand",
-            GestureType.HAND_SWIPE_RIGHT,
-            GestureType.HAND_SWIPE_LEFT,
-            horizontal=True,
-            use_palm=True,
-            pose_ok=open_hand,
-            pose_fraction=0.7,
-            settings=s,
-            # Real sweeps start with the hand still turning open; the open pose is required
-            # during the stroke instead, which also rejects curled wind-up and return moves.
-            pose_required_at_start=False,
-        )
-        self.thumbs = StaticPoseRecognizer(
-            GestureType.THUMBS_UP, thumbs_up, lambda: self._settings.thumbs_up_hold_s, s
+        self.swipes = DirectionalSwipeRecognizer(s, pose_ok=pointing, pose_fraction=0.6)
+        self.heart = StaticPoseRecognizer(
+            GestureType.HALF_HEART, half_heart, lambda: self._settings.half_heart_hold_s, s
         )
         self.stop = StaticPoseRecognizer(
             GestureType.STOP_GESTURE, stop_pose, lambda: self._settings.stop_hold_s, s
         )
+        self._apply_enabled()
 
-    def _enabled(self) -> list[SwipeRecognizer | StaticPoseRecognizer]:
+    def _apply_enabled(self) -> None:
         s = self._settings
-        out: list[SwipeRecognizer | StaticPoseRecognizer] = []
-        if s.enable_finger_swipes:
-            out.append(self.finger)
-        if s.enable_hand_sweeps:
-            out.append(self.hand)
-        if s.enable_thumbs_up:
-            out.append(self.thumbs)
+        self.swipes.enabled = frozenset(
+            gesture
+            for gesture, on in (
+                (GestureType.INDEX_SWIPE_DOWN, s.enable_swipe_down),
+                (GestureType.INDEX_SWIPE_UP, s.enable_swipe_up),
+                (GestureType.INDEX_SWIPE_LEFT, s.enable_swipe_left),
+                (GestureType.INDEX_SWIPE_RIGHT, s.enable_swipe_right),
+            )
+            if on
+        )
+
+    def _enabled(self) -> list[DirectionalSwipeRecognizer | StaticPoseRecognizer]:
+        s = self._settings
+        out: list[DirectionalSwipeRecognizer | StaticPoseRecognizer] = []
+        if self.swipes.enabled:
+            # Disabled directions are followed but never confirm (see the recognizer), so a
+            # movement in a disabled direction cannot be misread as another one.
+            out.append(self.swipes)
+        if s.enable_half_heart:
+            out.append(self.heart)
         if s.enable_stop:
             out.append(self.stop)
         return out
 
-    def _all(self) -> tuple[SwipeRecognizer | StaticPoseRecognizer, ...]:
-        return (self.finger, self.hand, self.thumbs, self.stop)
+    def _all(self) -> tuple[DirectionalSwipeRecognizer | StaticPoseRecognizer, ...]:
+        return (self.swipes, self.heart, self.stop)
 
     def reset(self) -> None:
         """Forget the control hand and every candidate (camera restart, mode change)."""
         self._control_track = None
         self._labels.clear()
         for recognizer in self._all():
-            recognizer.reset(rearm=isinstance(recognizer, SwipeRecognizer))
+            recognizer.reset(rearm=isinstance(recognizer, DirectionalSwipeRecognizer))
 
     # ------------------------------------------------------------------ control hand
 
@@ -206,6 +197,7 @@ class GestureEngine:
             self._settings = pending
             for recognizer in self._all():
                 recognizer.settings = pending
+            self._apply_enabled()
 
         ts = tracking.timestamp_ns
         self._observe_labels(tracking, motion)
@@ -233,7 +225,7 @@ class GestureEngine:
         if hand.track_id != self._control_track or hand.reset:
             rejection = self._cancel_all(ts, "control hand changed")
             for recognizer in self._all():
-                recognizer.reset(rearm=isinstance(recognizer, SwipeRecognizer))
+                recognizer.reset(rearm=isinstance(recognizer, DirectionalSwipeRecognizer))
             self._control_track = hand.track_id
         handedness = self.handedness_of(hand.track_id)
 
@@ -269,7 +261,7 @@ class GestureEngine:
             palm_length_px=length,
         )
 
-        steps: list[tuple[SwipeRecognizer | StaticPoseRecognizer, Step]] = []
+        steps: list[tuple[DirectionalSwipeRecognizer | StaticPoseRecognizer, Step]] = []
         enabled = self._enabled()
         for recognizer in enabled:
             steps.append((recognizer, recognizer.update(sample)))
@@ -279,7 +271,8 @@ class GestureEngine:
                 recognizer.reset(rearm=False)
 
         swipe_active = any(
-            isinstance(r, SwipeRecognizer) and r.phase is GesturePhase.CANDIDATE for r in enabled
+            isinstance(r, DirectionalSwipeRecognizer) and r.phase is GesturePhase.CANDIDATE
+            for r in enabled
         )
         event: GestureEvent | None = None
         candidates: list[GestureCandidate] = []
@@ -325,7 +318,7 @@ class GestureEngine:
         for recognizer in self._all():
             if recognizer.phase is GesturePhase.CANDIDATE:
                 rejection = GestureRejection(recognizer.gestures[0], reason, ts)
-                recognizer.reset(rearm=isinstance(recognizer, SwipeRecognizer))
+                recognizer.reset(rearm=isinstance(recognizer, DirectionalSwipeRecognizer))
         return rejection
 
     def _overall_phase(self, event: GestureEvent | None) -> GesturePhase:

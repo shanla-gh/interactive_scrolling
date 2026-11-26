@@ -41,7 +41,7 @@ def test_settings_survive_restart(tmp_path: Path) -> None:
             control_hand=ControlHandPreference.LEFT,
             enable_stop=False,
         ),
-        mapping={**DEFAULT_MAPPING, GestureType.FINGER_SWIPE_DOWN: ActionType.PREVIOUS_SHORT},
+        mapping={**DEFAULT_MAPPING, GestureType.INDEX_SWIPE_DOWN: ActionType.PREVIOUS_SHORT},
         analytics_enabled=False,
         bridge_port=48001,
         pairing_token="a-custom-pairing-token-123",
@@ -56,15 +56,16 @@ def test_invalid_fields_fall_back_individually(tmp_path: Path) -> None:
     path.write_text(
         json.dumps(
             {
+                "version": 2,
                 "gestures": {
                     "stop_hold_s": 99,  # out of range
-                    "thumbs_up_hold_s": 0.9,  # valid
+                    "half_heart_hold_s": 0.9,  # valid
                     "control_hand": "both",  # invalid enum
                     "enable_stop": "yes",  # wrong type
                     "cooldown_s": True,  # bool is not a number
                 },
                 "mapping": {
-                    "thumbs_up": "switch_to_study_app",  # not allowed
+                    "half_heart": "open_calculator",  # not an action
                     "stop_gesture": "none",  # valid
                     "unknown_gesture": "next_short",
                 },
@@ -78,11 +79,11 @@ def test_invalid_fields_fall_back_individually(tmp_path: Path) -> None:
     store = SettingsStore(path)
     settings = store.load()
     assert settings.gestures.stop_hold_s == GestureSettings().stop_hold_s
-    assert settings.gestures.thumbs_up_hold_s == 0.9
+    assert settings.gestures.half_heart_hold_s == 0.9
     assert settings.gestures.control_hand is ControlHandPreference.AUTO
     assert settings.gestures.enable_stop is True
     assert settings.gestures.cooldown_s == GestureSettings().cooldown_s
-    assert settings.mapping[GestureType.THUMBS_UP] is ActionType.LIKE_SHORT
+    assert settings.mapping[GestureType.HALF_HEART] is ActionType.LIKE_SHORT
     assert settings.mapping[GestureType.STOP_GESTURE] is ActionType.NONE
     assert settings.analytics_enabled is True
     assert settings.bridge_port == DEFAULT_BRIDGE_PORT
@@ -110,3 +111,71 @@ def test_save_is_atomic_and_leaves_no_temporary_files(tmp_path: Path) -> None:
     for _ in range(3):
         assert store.save(UserSettings())
     assert [p.name for p in tmp_path.iterdir()] == ["settings.json"]
+
+
+def test_version_1_settings_are_migrated_without_losing_user_choices(tmp_path: Path) -> None:
+    """A 0.2 settings file: renamed fields keep their values, removed actions take the new
+    defaults, values at an old default take the new default, and the file is backed up."""
+    path = tmp_path / "settings.json"
+    v1 = {
+        "version": 1,
+        "gestures": {
+            "preset": "custom",
+            "finger_swipe_min_distance_palms": 0.95,
+            "finger_swipe_min_speed_palms_s": 2.4,
+            "hand_sweep_min_distance_palms": 0.75,
+            "thumbs_up_hold_s": 0.7,
+            "cooldown_s": 0.6,  # the version 1 default
+            "return_window_s": 1.4,  # customized
+            "control_hand": "left",
+            "enable_finger_swipes": True,
+            "enable_hand_sweeps": False,
+            "enable_thumbs_up": True,
+            "enable_stop": False,
+        },
+        "mapping": {
+            "finger_swipe_down": "previous_short",
+            "finger_swipe_up": "next_short",
+            "hand_swipe_right": "switch_to_study_app",
+            "hand_swipe_left": "return_to_social_app",
+            "thumbs_up": "like_short",
+            "stop_gesture": "toggle_playback",
+        },
+        "analytics_enabled": False,
+        "bridge_port": 48002,
+        "pairing_token": "an-existing-pairing-token",
+    }
+    path.write_text(json.dumps(v1), encoding="utf-8")
+    store = SettingsStore(path)
+    settings = store.load()
+    g = settings.gestures
+    assert g.preset is SensitivityPreset.CUSTOM
+    assert g.swipe_min_distance_palms == 0.95
+    assert g.swipe_min_speed_palms_s == 2.4
+    assert g.half_heart_hold_s == 0.7
+    assert g.cooldown_s == GestureSettings().cooldown_s
+    assert g.return_window_s == 1.4
+    assert g.control_hand is ControlHandPreference.LEFT
+    assert (g.enable_swipe_down, g.enable_swipe_up) == (True, True)
+    assert (g.enable_swipe_left, g.enable_swipe_right) == (False, False)
+    assert g.enable_half_heart is True and g.enable_stop is False
+    m = settings.mapping
+    assert m[GestureType.INDEX_SWIPE_DOWN] is ActionType.PREVIOUS_SHORT
+    assert m[GestureType.INDEX_SWIPE_UP] is ActionType.NEXT_SHORT
+    assert m[GestureType.INDEX_SWIPE_RIGHT] is ActionType.NEXT_BROWSER_TAB
+    assert m[GestureType.INDEX_SWIPE_LEFT] is ActionType.PREVIOUS_BROWSER_TAB
+    assert m[GestureType.HALF_HEART] is ActionType.LIKE_SHORT
+    assert settings.analytics_enabled is False
+    assert settings.bridge_port == 48002
+    assert settings.pairing_token == "an-existing-pairing-token"
+    assert store.warnings == []
+    assert store.migrations
+    backup = tmp_path / "settings.json.v1-backup"
+    assert json.loads(backup.read_text(encoding="utf-8")) == v1
+    # Saving writes version 2; loading it again needs no migration and keeps the backup.
+    assert store.save(settings)
+    again = SettingsStore(path)
+    assert again.load() == settings
+    assert again.migrations == []
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+    assert json.loads(backup.read_text(encoding="utf-8")) == v1

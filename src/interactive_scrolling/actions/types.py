@@ -32,8 +32,8 @@ class ActionType(enum.Enum):
     PREVIOUS_SHORT = "previous_short"
     LIKE_SHORT = "like_short"
     TOGGLE_PLAYBACK = "toggle_playback"
-    SWITCH_TO_STUDY_APP = "switch_to_study_app"
-    RETURN_TO_SOCIAL_APP = "return_to_social_app"
+    NEXT_BROWSER_TAB = "next_browser_tab"
+    PREVIOUS_BROWSER_TAB = "previous_browser_tab"
 
     @property
     def label(self) -> str:
@@ -42,7 +42,7 @@ class ActionType(enum.Enum):
     @property
     def available(self) -> bool:
         """Whether this version can execute the action."""
-        return self in YOUTUBE_ACTIONS
+        return self in AVAILABLE_ACTIONS
 
 
 _ACTION_LABELS = {
@@ -51,11 +51,11 @@ _ACTION_LABELS = {
     ActionType.PREVIOUS_SHORT: "Previous Short",
     ActionType.LIKE_SHORT: "Like Short",
     ActionType.TOGGLE_PLAYBACK: "Pause / resume",
-    ActionType.SWITCH_TO_STUDY_APP: "Switch to study app (planned)",
-    ActionType.RETURN_TO_SOCIAL_APP: "Return to social app (planned)",
+    ActionType.NEXT_BROWSER_TAB: "Next browser tab",
+    ActionType.PREVIOUS_BROWSER_TAB: "Previous browser tab",
 }
 
-YOUTUBE_ACTIONS = frozenset(
+SHORTS_ACTIONS = frozenset(
     {
         ActionType.NEXT_SHORT,
         ActionType.PREVIOUS_SHORT,
@@ -63,22 +63,29 @@ YOUTUBE_ACTIONS = frozenset(
         ActionType.TOGGLE_PLAYBACK,
     }
 )
+"""Actions that require a valid YouTube Shorts tab."""
+TAB_ACTIONS = frozenset({ActionType.NEXT_BROWSER_TAB, ActionType.PREVIOUS_BROWSER_TAB})
+"""Actions that require the supported browser to be the active application."""
+AVAILABLE_ACTIONS = SHORTS_ACTIONS | TAB_ACTIONS
+YOUTUBE_ACTIONS = SHORTS_ACTIONS
 
-CONFIGURABLE_GESTURES = (
-    GestureType.FINGER_SWIPE_DOWN,
-    GestureType.FINGER_SWIPE_UP,
-    GestureType.THUMBS_UP,
-    GestureType.STOP_GESTURE,
-)
-"""Gestures whose action the user can change. Hand sweeps are reserved for M4."""
+LEGACY_ACTION_NAMES = {
+    # Version 0.2 reserved the hand sweeps for application switching, which Brief 003 removed.
+    "switch_to_study_app": None,
+    "return_to_social_app": None,
+}
+"""Stored action names of earlier versions; ``None`` means "use the current default"."""
+
+CONFIGURABLE_GESTURES = tuple(GestureType)
+"""Every gesture can be mapped to any available action (or to none)."""
 
 DEFAULT_MAPPING: dict[GestureType, ActionType] = {
-    GestureType.FINGER_SWIPE_DOWN: ActionType.NEXT_SHORT,
-    GestureType.FINGER_SWIPE_UP: ActionType.PREVIOUS_SHORT,
-    GestureType.THUMBS_UP: ActionType.LIKE_SHORT,
+    GestureType.INDEX_SWIPE_DOWN: ActionType.NEXT_SHORT,
+    GestureType.INDEX_SWIPE_UP: ActionType.PREVIOUS_SHORT,
+    GestureType.INDEX_SWIPE_RIGHT: ActionType.NEXT_BROWSER_TAB,
+    GestureType.INDEX_SWIPE_LEFT: ActionType.PREVIOUS_BROWSER_TAB,
+    GestureType.HALF_HEART: ActionType.LIKE_SHORT,
     GestureType.STOP_GESTURE: ActionType.TOGGLE_PLAYBACK,
-    GestureType.HAND_SWIPE_RIGHT: ActionType.SWITCH_TO_STUDY_APP,
-    GestureType.HAND_SWIPE_LEFT: ActionType.RETURN_TO_SOCIAL_APP,
 }
 
 
@@ -90,11 +97,8 @@ def validate_mapping(mapping: dict[GestureType, ActionType]) -> dict[GestureType
     """Return a complete mapping; reject assignments outside the allowed action set."""
     result = dict(DEFAULT_MAPPING)
     for gesture, action in mapping.items():
-        if gesture in CONFIGURABLE_GESTURES:
-            if action is not ActionType.NONE and action not in YOUTUBE_ACTIONS:
-                raise MappingError(f"{gesture.label} cannot be mapped to {action.label}.")
-        elif action is not DEFAULT_MAPPING[gesture]:
-            raise MappingError(f"{gesture.label} is reserved for a later milestone.")
+        if action is not ActionType.NONE and action not in AVAILABLE_ACTIONS:
+            raise MappingError(f"{gesture.label} cannot be mapped to {action.label}.")
         result[gesture] = action
     return result
 

@@ -19,9 +19,9 @@ from PySide6.QtWidgets import (
 )
 
 from interactive_scrolling.actions.types import (
+    AVAILABLE_ACTIONS,
     CONFIGURABLE_GESTURES,
     DEFAULT_MAPPING,
-    YOUTUBE_ACTIONS,
     ActionType,
     validate_mapping,
 )
@@ -33,23 +33,91 @@ from interactive_scrolling.config.settings import (
 )
 from interactive_scrolling.gestures.types import GestureType
 
-# (field, label, unit, minimum, maximum, step)
+# (field, label, unit, minimum, maximum, step, tooltip)
 TUNABLES = (
-    ("finger_swipe_min_distance_palms", "Swipe distance", "palm lengths", 0.3, 3.0, 0.05),
-    ("finger_swipe_min_speed_palms_s", "Swipe speed", "palm lengths/s", 0.5, 10.0, 0.1),
-    ("hand_sweep_min_distance_palms", "Sweep distance", "palm lengths", 0.5, 5.0, 0.05),
-    ("hand_sweep_min_speed_palms_s", "Sweep speed", "palm lengths/s", 0.5, 12.0, 0.1),
-    ("thumbs_up_hold_s", "Thumbs-up hold", "s", 0.1, 3.0, 0.05),
-    ("stop_hold_s", "Stop-pose hold", "s", 0.1, 3.0, 0.05),
-    ("cooldown_s", "Repeat cooldown", "s", 0.0, 5.0, 0.05),
-    ("return_window_s", "Return-movement window", "s", 0.0, 3.0, 0.05),
+    (
+        "swipe_min_distance_palms",
+        "Swipe distance",
+        "palm lengths",
+        0.3,
+        3.0,
+        0.05,
+        "How far the index fingertip must travel. One palm length is your wrist-to-knuckle "
+        "distance, so the value does not depend on how far you sit from the camera.",
+    ),
+    (
+        "swipe_min_speed_palms_s",
+        "Swipe speed",
+        "palm lengths/s",
+        0.5,
+        10.0,
+        0.1,
+        "Minimum peak speed of the fingertip during a swipe.",
+    ),
+    (
+        "half_heart_hold_s",
+        "Half-heart hold",
+        "s",
+        0.1,
+        3.0,
+        0.05,
+        "How long the half-heart must be held still before it counts.",
+    ),
+    (
+        "stop_hold_s",
+        "Stop-pose hold",
+        "s",
+        0.1,
+        3.0,
+        0.05,
+        "How long the open palm must be held still before it counts.",
+    ),
+    (
+        "cooldown_s",
+        "Swipe cooldown",
+        "s",
+        0.0,
+        5.0,
+        0.05,
+        "Minimum time between two swipes.",
+    ),
+    (
+        "return_window_s",
+        "Return-movement window",
+        "s",
+        0.0,
+        3.0,
+        0.05,
+        "After a swipe, moving the hand back within this time is ignored (it is not read as "
+        "the opposite swipe).",
+    ),
 )
 ENABLES = (
-    ("enable_finger_swipes", "Finger swipes (up / down)"),
-    ("enable_hand_sweeps", "Hand sweeps (left / right)"),
-    ("enable_thumbs_up", "Thumbs up"),
-    ("enable_stop", "Stop gesture"),
+    ("enable_swipe_down", "Swipe down"),
+    ("enable_swipe_up", "Swipe up"),
+    ("enable_swipe_right", "Swipe right"),
+    ("enable_swipe_left", "Swipe left"),
+    ("enable_half_heart", "Half-heart"),
+    ("enable_stop", "Stop pose"),
 )
+CONFIGURABLE_GESTURES_ORDER = (
+    GestureType.INDEX_SWIPE_DOWN,
+    GestureType.INDEX_SWIPE_UP,
+    GestureType.INDEX_SWIPE_RIGHT,
+    GestureType.INDEX_SWIPE_LEFT,
+    GestureType.HALF_HEART,
+    GestureType.STOP_GESTURE,
+)
+assert set(CONFIGURABLE_GESTURES_ORDER) == set(CONFIGURABLE_GESTURES)
+ACTION_ORDER = (
+    ActionType.NEXT_SHORT,
+    ActionType.PREVIOUS_SHORT,
+    ActionType.LIKE_SHORT,
+    ActionType.TOGGLE_PLAYBACK,
+    ActionType.NEXT_BROWSER_TAB,
+    ActionType.PREVIOUS_BROWSER_TAB,
+)
+assert set(ACTION_ORDER) == set(AVAILABLE_ACTIONS)
 PRESETS = (
     SensitivityPreset.LOW,
     SensitivityPreset.BALANCED,
@@ -93,8 +161,9 @@ class GestureSettingsDialog(QDialog):
         tune_box = QGroupBox("Thresholds")
         tune = QFormLayout(tune_box)
         self.spins: dict[str, QDoubleSpinBox] = {}
-        for name, label, unit, low, high, step in TUNABLES:
+        for name, label, unit, low, high, step, tip in TUNABLES:
             spin = QDoubleSpinBox()
+            spin.setToolTip(tip)
             spin.setRange(low, high)
             spin.setSingleStep(step)
             spin.setDecimals(2)
@@ -104,28 +173,29 @@ class GestureSettingsDialog(QDialog):
             tune.addRow(label, spin)
         root.addWidget(tune_box)
 
-        enable_box = QGroupBox("Gestures")
-        enable = QVBoxLayout(enable_box)
-        self.enables: dict[str, QCheckBox] = {}
-        for name, label in ENABLES:
-            box = QCheckBox(label)
-            self.enables[name] = box
-            enable.addWidget(box)
-        root.addWidget(enable_box)
-
-        map_box = QGroupBox("Actions")
+        map_box = QGroupBox("Gestures and actions")
         form = QFormLayout(map_box)
+        self.enables: dict[str, QCheckBox] = {}
         self.mapping_boxes: dict[GestureType, QComboBox] = {}
-        for gesture in CONFIGURABLE_GESTURES:
+        enable_names = dict(zip(CONFIGURABLE_GESTURES_ORDER, (n for n, _ in ENABLES), strict=True))
+        for gesture in CONFIGURABLE_GESTURES_ORDER:
+            name = enable_names[gesture]
+            box = QCheckBox(dict(ENABLES)[name])
+            box.setToolTip("Untick to switch this gesture off.")
+            self.enables[name] = box
             combo = QComboBox()
             combo.addItem(ActionType.NONE.label, ActionType.NONE)
-            for action in sorted(YOUTUBE_ACTIONS, key=lambda a: a.value):
+            for action in ACTION_ORDER:
                 combo.addItem(action.label, action)
             self.mapping_boxes[gesture] = combo
-            form.addRow(gesture.label.title(), combo)
-        reserved = QLabel("Hand sweeps are reserved for switching apps (planned for M4).")
-        reserved.setObjectName("rowKey")
-        form.addRow(reserved)
+            form.addRow(box, combo)
+        note = QLabel(
+            "Shorts actions work only on a YouTube Shorts tab; tab actions only while the "
+            "browser is the active window. Either hand can be used."
+        )
+        note.setWordWrap(True)
+        note.setObjectName("rowKey")
+        form.addRow(note)
         root.addWidget(map_box)
 
         buttons = QDialogButtonBox(

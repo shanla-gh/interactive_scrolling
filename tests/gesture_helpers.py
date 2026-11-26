@@ -52,6 +52,9 @@ class Pose:
     thumb_dir: tuple[float, float, float]
     thumb_bend: tuple[float, float]
     roll_deg: float = 0.0
+    index_in_plane: bool = False
+    """Curl the index finger sideways in the image plane (towards +x before roll and mirroring)
+    instead of towards the camera, as in the half-heart."""
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
@@ -68,11 +71,30 @@ FIST = Pose({f: CURLED for f in _ORDER}, (0.6, -0.5, -0.6), (45.0, 50.0))
 # Thumb extended sideways, then the whole hand is rolled so the thumb points up.
 THUMBS_UP = Pose({f: CURLED for f in _ORDER}, (-1.0, 0.0, 0.0), (5.0, 5.0), roll_deg=90.0)
 THUMBS_DOWN = Pose({f: CURLED for f in _ORDER}, (-1.0, 0.0, 0.0), (5.0, 5.0), roll_deg=-90.0)
+# One half of a two-handed heart: hand upright, index curving over sideways with its tip hooking
+# down, thumb pointing down towards the heart's bottom point, the other fingers folded.
+HALF_HEART = Pose(
+    {"index": (40.0, 70.0, 50.0), "middle": CURLED, "ring": CURLED, "pinky": CURLED},
+    (0.55, 0.83, 0.0),
+    (5.0, 5.0),
+    index_in_plane=True,
+)
+# The same hand with the fingertips touching (a pinch) and a horizontal "C" (hand on its side).
+PINCH = Pose(
+    {"index": (40.0, 70.0, 50.0), "middle": CURLED, "ring": CURLED, "pinky": CURLED},
+    (0.2, -0.98, 0.0),
+    (5.0, 5.0),
+    index_in_plane=True,
+)
+C_SIDEWAYS = Pose(HALF_HEART.fingers, HALF_HEART.thumb_dir, HALF_HEART.thumb_bend, 90.0, True)
 
 
-def _chain(base: np.ndarray, direction: np.ndarray, lengths, bends) -> list[np.ndarray]:
-    """Joint positions along a finger; bends curl the finger towards the camera (-z)."""
-    toward = np.array([0.0, 0.0, -1.0])
+def _chain(
+    base: np.ndarray, direction: np.ndarray, lengths, bends, toward: np.ndarray | None = None
+) -> list[np.ndarray]:
+    """Joint positions along a finger; bends curl the finger towards ``toward`` (default: the
+    camera, -z)."""
+    toward = np.array([0.0, 0.0, -1.0]) if toward is None else toward
     points = []
     angle = 0.0
     position = base
@@ -97,7 +119,12 @@ def hand_landmarks(pose: Pose, scale: float = 1.0) -> np.ndarray:
         base = 5 + 4 * i
         pts[base] = mcp
         direction = _unit(mcp)
-        pts[base + 1 : base + 4] = _chain(mcp, direction, _SEGMENTS[name], pose.fingers[name])
+        toward = None
+        if name == "index" and pose.index_in_plane:
+            toward = np.array([-direction[1], direction[0], 0.0])
+        pts[base + 1 : base + 4] = _chain(
+            mcp, direction, _SEGMENTS[name], pose.fingers[name], toward
+        )
     roll = math.radians(pose.roll_deg)
     rot = np.array(
         [[math.cos(roll), -math.sin(roll), 0], [math.sin(roll), math.cos(roll), 0], [0, 0, 1]]

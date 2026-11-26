@@ -10,11 +10,17 @@ from interactive_scrolling.vision.landmarks import Handedness
 
 
 class GestureType(enum.Enum):
-    FINGER_SWIPE_DOWN = "finger_swipe_down"
-    FINGER_SWIPE_UP = "finger_swipe_up"
-    HAND_SWIPE_LEFT = "hand_swipe_left"
-    HAND_SWIPE_RIGHT = "hand_swipe_right"
-    THUMBS_UP = "thumbs_up"
+    """The recognized gestures (Engineering Brief 003).
+
+    The four index swipes are one gesture family: a pointing hand moving in one direction.
+    ``left`` and ``right`` are the user's own left and right.
+    """
+
+    INDEX_SWIPE_DOWN = "index_swipe_down"
+    INDEX_SWIPE_UP = "index_swipe_up"
+    INDEX_SWIPE_LEFT = "index_swipe_left"
+    INDEX_SWIPE_RIGHT = "index_swipe_right"
+    HALF_HEART = "half_heart"
     STOP_GESTURE = "stop_gesture"
 
     @property
@@ -23,23 +29,57 @@ class GestureType(enum.Enum):
 
     @property
     def is_dynamic(self) -> bool:
-        return self in _DYNAMIC
+        return self in SWIPES
+
+    @classmethod
+    def from_stored(cls, value: str) -> GestureType:
+        """Parse a stored gesture name, including names written by earlier versions."""
+        return cls(LEGACY_GESTURE_NAMES.get(value, value))
 
 
 _LABELS = {
-    GestureType.FINGER_SWIPE_DOWN: "SWIPE DOWN",
-    GestureType.FINGER_SWIPE_UP: "SWIPE UP",
-    GestureType.HAND_SWIPE_LEFT: "HAND SWIPE LEFT",
-    GestureType.HAND_SWIPE_RIGHT: "HAND SWIPE RIGHT",
-    GestureType.THUMBS_UP: "THUMBS UP",
+    GestureType.INDEX_SWIPE_DOWN: "SWIPE DOWN",
+    GestureType.INDEX_SWIPE_UP: "SWIPE UP",
+    GestureType.INDEX_SWIPE_LEFT: "SWIPE LEFT",
+    GestureType.INDEX_SWIPE_RIGHT: "SWIPE RIGHT",
+    GestureType.HALF_HEART: "HALF HEART",
     GestureType.STOP_GESTURE: "STOP",
 }
-_DYNAMIC = {
-    GestureType.FINGER_SWIPE_DOWN,
-    GestureType.FINGER_SWIPE_UP,
-    GestureType.HAND_SWIPE_LEFT,
-    GestureType.HAND_SWIPE_RIGHT,
+SWIPES = (
+    GestureType.INDEX_SWIPE_DOWN,
+    GestureType.INDEX_SWIPE_UP,
+    GestureType.INDEX_SWIPE_LEFT,
+    GestureType.INDEX_SWIPE_RIGHT,
+)
+
+LEGACY_GESTURE_NAMES = {
+    # Version 0.2 (Brief 002). The finger swipes were already pointing-hand swipes, so they map
+    # to the same gesture. The open-hand sweeps and the thumbs up were different gestures; their
+    # *roles* (horizontal navigation, like) are taken over by the new gestures.
+    "finger_swipe_down": "index_swipe_down",
+    "finger_swipe_up": "index_swipe_up",
+    "hand_swipe_left": "index_swipe_left",
+    "hand_swipe_right": "index_swipe_right",
+    "thumbs_up": "half_heart",
 }
+LEGACY_GESTURE_LABELS = {
+    "finger_swipe_down": "SWIPE DOWN",
+    "finger_swipe_up": "SWIPE UP",
+    "hand_swipe_left": "HAND SWEEP LEFT (v0.2)",
+    "hand_swipe_right": "HAND SWEEP RIGHT (v0.2)",
+    "thumbs_up": "THUMBS UP (v0.2)",
+}
+"""Display names for gesture names found in analytics recorded by version 0.2."""
+
+
+def stored_gesture_label(value: str) -> str:
+    """Human-readable name of a gesture as stored in the analytics database."""
+    if value in LEGACY_GESTURE_LABELS:
+        return LEGACY_GESTURE_LABELS[value]
+    try:
+        return GestureType(value).label
+    except ValueError:
+        return value
 
 
 class GesturePhase(enum.Enum):
@@ -72,9 +112,11 @@ class GestureEvent:
     ``timestamp_ns`` is the capture timestamp of the frame that confirmed the gesture (the
     shared ``perf_counter_ns`` clock). Directions are from the user's perspective: ``left`` and
     ``right`` refer to the user's own left and right, independent of preview mirroring.
-    ``magnitude_palms`` is the stroke length for swipes; ``duration_s`` is the stroke time for
-    swipes and the hold time for static poses. No confidence value is reported because the
-    classifier is rule based; the criteria are documented in ``docs/architecture/GESTURES.md``.
+    ``magnitude_palms`` is the fingertip stroke length for swipes and ``palm_magnitude_palms``
+    the palm's displacement along the same direction (how much of the stroke was whole-hand
+    movement); ``duration_s`` is the stroke time for swipes and the hold time for static poses.
+    No confidence value is reported because the classifier is rule based; the criteria are
+    documented in ``docs/architecture/GESTURES.md``.
     """
 
     gesture: GestureType
@@ -85,6 +127,7 @@ class GestureEvent:
     magnitude_palms: float | None = None
     peak_speed_palms_s: float | None = None
     duration_s: float = 0.0
+    palm_magnitude_palms: float | None = None
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 

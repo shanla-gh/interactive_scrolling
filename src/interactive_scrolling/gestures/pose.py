@@ -11,6 +11,26 @@ about 0-40 for a straight finger and 180-300 for a finger folded into a fist.
 
 Image-space directions (``thumb_up_alignment``, ``fingers_up_alignment``) use the unmirrored
 frame with y pointing down; an alignment of 1.0 means pointing straight up.
+
+Half-heart
+----------
+One half of the familiar two-handed heart, made with one hand held upright: the index finger
+curves up and over towards the heart's centre line and its tip hooks downwards, the thumb
+points down towards the heart's bottom point, the tips stay apart (the other hand would close
+the gap), and the remaining fingers are folded or curved with the index. It is defined by
+image-space geometry (relative to the measured palm length, independent of handedness):
+
+* index curved (flexion within ``HEART_INDEX_FLEXION``), not straight as in pointing and not
+  tucked into the palm as in a fist (tip at least ``HEART_MIN_INDEX_REACH`` from its knuckle);
+* the index tip hooks down: at least ``HEART_MIN_HOOK`` below the highest index joint;
+* the thumb is not curled and points downwards (``HEART_MIN_THUMB_DOWN``), its tip at least
+  ``HEART_MIN_THUMB_BELOW`` below the index tip;
+* the tips are apart (``HEART_GAP``): touching tips are a pinch, not a heart;
+* index tip and thumb tip are on the same side of the hand axis (the heart's opening);
+* middle, ring and little finger are not extended; the hand is upright.
+
+The exact real-world geometry still needs labeled recordings of the gesture (see
+docs/architecture/GESTURES.md); the thresholds are an engineering starting point.
 """
 
 from __future__ import annotations
@@ -41,6 +61,14 @@ THUMB_CURLED_MIN = 80.0
 # Pose direction requirements (cosine of the allowed angle from straight up).
 THUMB_UP_MIN_ALIGNMENT = math.cos(math.radians(40))
 FINGERS_UP_MIN_ALIGNMENT = math.cos(math.radians(40))
+# Half-heart geometry (palm lengths unless noted).
+HEART_INDEX_FLEXION = (80.0, 230.0)
+HEART_MIN_INDEX_REACH = 0.5
+HEART_MIN_HOOK = 0.12
+HEART_MIN_THUMB_DOWN = math.cos(math.radians(70))
+HEART_MIN_THUMB_BELOW = 0.25
+HEART_GAP = (0.3, 2.2)
+HEART_MIN_UPRIGHT = math.cos(math.radians(65))
 
 
 class FingerState(enum.Enum):
@@ -53,6 +81,7 @@ class PoseLabel(enum.Enum):
     OPEN_PALM = "open palm"
     POINTING = "pointing"
     THUMBS_UP = "thumbs up"
+    HALF_HEART = "half heart"
     FIST = "fist"
     OTHER = "other"
 
@@ -69,6 +98,7 @@ class HandPose:
     thumb_tip_highest: bool
     """The thumb tip is above every other landmark in the image."""
     label: PoseLabel
+    heart: HeartGeometry | None = None
 
     def extended(self, *fingers: str) -> bool:
         return all(self.states[f] is FingerState.EXTENDED for f in fingers)
@@ -83,6 +113,64 @@ class HandPose:
             self.label is PoseLabel.OPEN_PALM
             and self.fingers_up_alignment >= FINGERS_UP_MIN_ALIGNMENT
         )
+
+
+@dataclass(frozen=True, slots=True)
+class HeartGeometry:
+    """Image-space measurements used by the half-heart rule (palm lengths unless noted)."""
+
+    index_reach: float
+    """Distance from the index knuckle to its tip."""
+    hook: float
+    """How far the index tip lies below the highest index joint."""
+    thumb_down_alignment: float
+    """Cosine between the thumb (MCP -> tip) and image-down."""
+    thumb_below_index: float
+    """How far the thumb tip lies below the index tip."""
+    gap: float
+    """Distance between the thumb tip and the index tip."""
+    same_side: bool
+    """Index tip and thumb tip lie on the same side of the hand axis."""
+
+    def matches(self, pose: HandPose) -> bool:
+        low, high = HEART_INDEX_FLEXION
+        return (
+            low <= pose.flexion["index"] <= high
+            and pose.states["thumb"] is not FingerState.CURLED
+            and not any(pose.states[f] is FingerState.EXTENDED for f in ("middle", "ring", "pinky"))
+            and pose.fingers_up_alignment >= HEART_MIN_UPRIGHT
+            and self.index_reach >= HEART_MIN_INDEX_REACH
+            and self.hook >= HEART_MIN_HOOK
+            and self.thumb_down_alignment >= HEART_MIN_THUMB_DOWN
+            and self.thumb_below_index >= HEART_MIN_THUMB_BELOW
+            and HEART_GAP[0] <= self.gap <= HEART_GAP[1]
+            and self.same_side
+        )
+
+
+def _heart_geometry(image: np.ndarray) -> HeartGeometry | None:
+    palm = float(np.linalg.norm(image[L.MIDDLE_FINGER_MCP] - image[L.WRIST]))
+    if palm < 1e-6:
+        return None
+    index_tip = image[L.INDEX_FINGER_TIP]
+    thumb_tip = image[L.THUMB_TIP]
+    top = min(image[L.INDEX_FINGER_PIP, 1], image[L.INDEX_FINGER_DIP, 1])
+    thumb = thumb_tip - image[L.THUMB_MCP]
+    thumb_norm = float(np.linalg.norm(thumb))
+    axis = image[L.MIDDLE_FINGER_MCP] - image[L.WRIST]
+
+    def side(point: np.ndarray) -> float:
+        rel = point - image[L.WRIST]
+        return float(axis[0] * rel[1] - axis[1] * rel[0])
+
+    return HeartGeometry(
+        index_reach=float(np.linalg.norm(index_tip - image[L.INDEX_FINGER_MCP])) / palm,
+        hook=float(index_tip[1] - top) / palm,
+        thumb_down_alignment=float(thumb[1] / thumb_norm) if thumb_norm > 1e-9 else 0.0,
+        thumb_below_index=float(thumb_tip[1] - index_tip[1]) / palm,
+        gap=float(np.linalg.norm(thumb_tip - index_tip)) / palm,
+        same_side=side(index_tip) * side(thumb_tip) > 0,
+    )
 
 
 def _bend(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
@@ -150,6 +238,7 @@ def analyze_pose(obs: HandObservation, width: int, height: int) -> HandPose:
         fingers_up_alignment=fingers_up,
         thumb_tip_highest=thumb_tip_highest,
         label=PoseLabel.OTHER,
+        heart=_heart_geometry(image),
     )
     return HandPose(
         flexion=flexion,
@@ -158,6 +247,7 @@ def analyze_pose(obs: HandObservation, width: int, height: int) -> HandPose:
         fingers_up_alignment=fingers_up,
         thumb_tip_highest=thumb_tip_highest,
         label=_label(pose),
+        heart=pose.heart,
     )
 
 
@@ -174,6 +264,8 @@ def _label(pose: HandPose) -> PoseLabel:
         and pose.thumb_tip_highest
     ):
         return PoseLabel.THUMBS_UP
+    if pose.heart is not None and pose.heart.matches(pose):
+        return PoseLabel.HALF_HEART
     if pose.curled(*four):
         return PoseLabel.FIST
     return PoseLabel.OTHER

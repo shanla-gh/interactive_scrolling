@@ -111,7 +111,9 @@ class StatsPanel(Card):
         g = stats.gestures
         s = stats.succeeded
         self.gestures.setText(str(stats.gestures_confirmed))
-        self.swipes.setText(f"{g.get('finger_swipe_down', 0)} / {g.get('finger_swipe_up', 0)}")
+        down = g.get("index_swipe_down", 0) + g.get("finger_swipe_down", 0)
+        up = g.get("index_swipe_up", 0) + g.get("finger_swipe_up", 0)
+        self.swipes.setText(f"{down} / {up}")
         self.navigation.setText(f"{s.get('next_short', 0)} / {s.get('previous_short', 0)}")
         self.likes.setText(f"{s.get('like_short', 0)}  (already liked: {stats.no_change})")
         self.playback.setText(str(s.get("toggle_playback", 0)))

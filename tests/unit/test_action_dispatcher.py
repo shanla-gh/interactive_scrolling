@@ -54,7 +54,7 @@ class FakeController:
         self.cancelled.set()
 
 
-def event(gesture: GestureType = G.FINGER_SWIPE_DOWN, age_s: float = 0.0) -> GestureEvent:
+def event(gesture: GestureType = G.INDEX_SWIPE_DOWN, age_s: float = 0.0) -> GestureEvent:
     return GestureEvent(gesture, time.perf_counter_ns() - int(age_s * 1e9), 1, Handedness.RIGHT)
 
 
@@ -115,9 +115,11 @@ def test_live_control_executes_mapped_action_with_confirmation(records) -> None:
 @pytest.mark.parametrize(
     ("gesture", "action"),
     [
-        (G.FINGER_SWIPE_UP, ActionType.PREVIOUS_SHORT),
-        (G.THUMBS_UP, ActionType.LIKE_SHORT),
+        (G.INDEX_SWIPE_UP, ActionType.PREVIOUS_SHORT),
+        (G.HALF_HEART, ActionType.LIKE_SHORT),
         (G.STOP_GESTURE, ActionType.TOGGLE_PLAYBACK),
+        (G.INDEX_SWIPE_RIGHT, ActionType.NEXT_BROWSER_TAB),
+        (G.INDEX_SWIPE_LEFT, ActionType.PREVIOUS_BROWSER_TAB),
     ],
 )
 def test_default_mapping(records, gesture, action) -> None:
@@ -129,14 +131,15 @@ def test_default_mapping(records, gesture, action) -> None:
     dispatcher.shutdown()
 
 
-def test_hand_sweeps_are_recognized_but_not_executed(records) -> None:
+def test_horizontal_swipes_switch_browser_tabs_by_default(records) -> None:
+    # Brief 003: the horizontal gestures navigate browser tabs (no application switching).
     controller = FakeController()
     dispatcher = make(controller, records)
-    record = dispatcher.submit(event(G.HAND_SWIPE_RIGHT))
-    assert record.status is ActionStatus.NOT_EXECUTED
-    assert "not available" in record.reason
-    time.sleep(0.1)
-    assert controller.executed == []
+    first = dispatcher.submit(event(G.INDEX_SWIPE_RIGHT))
+    assert wait_until(lambda: final(records, first.record_id) is not None)
+    second = dispatcher.submit(event(G.INDEX_SWIPE_LEFT))
+    assert wait_until(lambda: final(records, second.record_id) is not None)
+    assert controller.executed == [ActionType.NEXT_BROWSER_TAB, ActionType.PREVIOUS_BROWSER_TAB]
     dispatcher.shutdown()
 
 
@@ -222,20 +225,24 @@ def test_unmapped_gesture_is_not_executed(records) -> None:
 def test_custom_mapping_is_used(records) -> None:
     controller = FakeController()
     mapping = validate_mapping(
-        {G.FINGER_SWIPE_DOWN: ActionType.PREVIOUS_SHORT, G.FINGER_SWIPE_UP: ActionType.NEXT_SHORT}
+        {G.INDEX_SWIPE_DOWN: ActionType.PREVIOUS_SHORT, G.INDEX_SWIPE_UP: ActionType.NEXT_SHORT}
     )
     dispatcher = make(controller, records, mapping=mapping)
-    submitted = dispatcher.submit(event(G.FINGER_SWIPE_DOWN))
+    submitted = dispatcher.submit(event(G.INDEX_SWIPE_DOWN))
     assert wait_until(lambda: final(records, submitted.record_id) is not None)
     assert controller.executed == [ActionType.PREVIOUS_SHORT]
     dispatcher.shutdown()
 
 
 def test_invalid_mappings_are_refused() -> None:
+    class Unsupported:
+        label = "unsupported"
+
     with pytest.raises(MappingError):
-        validate_mapping({G.THUMBS_UP: ActionType.SWITCH_TO_STUDY_APP})
-    with pytest.raises(MappingError):
-        validate_mapping({G.HAND_SWIPE_LEFT: ActionType.NEXT_SHORT})
+        validate_mapping({G.HALF_HEART: Unsupported()})  # type: ignore[dict-item]
+    # Every gesture may be mapped to any available action.
+    remapped = validate_mapping({G.INDEX_SWIPE_LEFT: ActionType.NEXT_SHORT})
+    assert remapped[G.INDEX_SWIPE_LEFT] is ActionType.NEXT_SHORT
     assert validate_mapping({}) == DEFAULT_MAPPING
 
 

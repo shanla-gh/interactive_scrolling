@@ -5,7 +5,19 @@ from __future__ import annotations
 import pytest
 
 from interactive_scrolling.gestures.pose import PoseLabel, analyze_pose
-from tests.gesture_helpers import FIST, OPEN, POINTING, THUMBS_DOWN, THUMBS_UP, H, Pose, W
+from tests.gesture_helpers import (
+    C_SIDEWAYS,
+    FIST,
+    HALF_HEART,
+    OPEN,
+    PINCH,
+    POINTING,
+    THUMBS_DOWN,
+    THUMBS_UP,
+    H,
+    Pose,
+    W,
+)
 from tests.gesture_helpers import make_observation as obs
 
 
@@ -18,6 +30,9 @@ from tests.gesture_helpers import make_observation as obs
         (FIST, PoseLabel.FIST),
         (THUMBS_UP, PoseLabel.THUMBS_UP),
         (THUMBS_DOWN, PoseLabel.FIST),
+        (HALF_HEART, PoseLabel.HALF_HEART),
+        (PINCH, PoseLabel.FIST),
+        (C_SIDEWAYS, PoseLabel.FIST),
     ],
 )
 def test_pose_labels(pose: Pose, label: PoseLabel, mirror: bool) -> None:
@@ -51,3 +66,27 @@ def test_thumb_must_point_up_for_thumbs_up() -> None:
     pose = analyze_pose(obs(tilted, (600, 500)), W, H)
     assert pose.label is PoseLabel.FIST
     assert pose.thumb_up_alignment < 0.77
+
+
+@pytest.mark.parametrize("palm_px", [50.0, 100.0, 200.0])
+@pytest.mark.parametrize("mirror", [False, True], ids=["right-hand", "left-hand"])
+def test_half_heart_geometry_is_size_and_hand_independent(palm_px: float, mirror: bool) -> None:
+    pose = analyze_pose(obs(HALF_HEART, (600, 500), palm_px, mirror=mirror), W, H)
+    assert pose.label is PoseLabel.HALF_HEART
+    heart = pose.heart
+    assert heart is not None
+    assert heart.hook > 0.12 and heart.same_side
+    assert 0.3 <= heart.gap <= 2.2
+
+
+def test_pinch_is_not_a_half_heart() -> None:
+    # Thumb tip close to the index tip: an ordinary pinch.
+    pose = analyze_pose(obs(PINCH, (600, 500)), W, H)
+    assert pose.label is not PoseLabel.HALF_HEART
+    assert pose.heart is not None and pose.heart.gap < 0.5
+
+
+def test_sideways_c_shape_is_not_a_half_heart() -> None:
+    pose = analyze_pose(obs(C_SIDEWAYS, (600, 500)), W, H)
+    assert pose.label is not PoseLabel.HALF_HEART
+    assert pose.fingers_up_alignment < 0.4
