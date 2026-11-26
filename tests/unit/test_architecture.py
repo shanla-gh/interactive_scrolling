@@ -64,6 +64,15 @@ FORBIDDEN: dict[str, tuple[str, ...]] = {
         "interactive_scrolling.core.pipeline",
     ),
     "storage": ("PySide6", "cv2", "mediapipe", "interactive_scrolling.ui"),
+    "wellbeing": (
+        "PySide6",
+        "cv2",
+        "mediapipe",
+        "interactive_scrolling.ui",
+        "interactive_scrolling.visualization",
+        "interactive_scrolling.core.pipeline",
+        "interactive_scrolling.integrations",
+    ),
     "integrations/youtube": (
         "PySide6",
         "cv2",
@@ -100,10 +109,14 @@ def test_layer_does_not_import_forbidden_modules(layer: str, path: Path) -> None
             )
 
 
-def test_mediapipe_is_confined_to_the_tracker_adapter() -> None:
-    offenders = [
+def test_mediapipe_is_confined_to_the_model_adapters() -> None:
+    # Brief 003 added two optional models; each has its own adapter in vision/.
+    offenders = sorted(
         str(path.relative_to(PACKAGE))
         for path in PACKAGE.rglob("*.py")
         if any(m.split(".")[0] == "mediapipe" for m in imported_modules(path))
-    ]
-    assert offenders == [str(Path("vision") / "hand_tracker.py")]
+    )
+    assert offenders == sorted(
+        str(Path("vision") / name)
+        for name in ("hand_tracker.py", "segmenter.py", "face_tracker.py")
+    )

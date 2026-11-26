@@ -1,11 +1,16 @@
-"""Location, verification and one-time download of the hand landmarker model.
+"""Location, verification and one-time download of the local MediaPipe models.
 
-The model file is not stored in the repository. It is downloaded once from Google's
-official MediaPipe model storage, verified against a pinned SHA-256 digest, and then
-used fully offline.
+Model files are not stored in the repository. Each is downloaded once from Google's official
+MediaPipe model storage, verified against a pinned SHA-256 digest, and then used fully offline.
 
-Model: MediaPipe Hand Landmarker (``hand_landmarker.task``, float16, version 1).
-Published by Google under the Apache License 2.0; see ``docs/THIRD_PARTY_NOTICES.md``.
+* Hand Landmarker (``hand_landmarker.task``, float16, version 1) - required.
+* Selfie Segmenter, landscape (``selfie_segmenter_landscape.tflite``, float16, version 1) -
+  optional, only for the transparent background of the Content Creator overlay.
+* Face Landmarker (``face_landmarker.task``, float16, version 1) - optional, only for the
+  Progressive Clown Transformation and passive eye analytics.
+
+All are published by Google under the Apache License 2.0 and declare surveillance and identity
+recognition out of scope; see ``docs/THIRD_PARTY_NOTICES.md``.
 """
 
 from __future__ import annotations
@@ -13,9 +18,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import sys
 import tempfile
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
@@ -34,6 +41,72 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 """Repository root when running from a source checkout (``src/`` layout)."""
 
 
+@dataclass(frozen=True, slots=True)
+class ModelAsset:
+    key: str
+    filename: str
+    url: str
+    sha256: str
+    size_bytes: int
+    description: str
+    env_var: str
+    required: bool = False
+
+    def path(self) -> Path:
+        """``$<env_var>``, then ``<repository>/models/<file>``, ``./models/<file>``, and the
+        folder of a packaged executable; the first existing file wins."""
+        env = os.environ.get(self.env_var)
+        if env:
+            return Path(env)
+        candidates = [
+            PROJECT_ROOT / "models" / self.filename,
+            Path.cwd() / "models" / self.filename,
+        ]
+        frozen = getattr(sys, "_MEIPASS", None)
+        if frozen:
+            candidates.insert(0, Path(frozen) / "models" / self.filename)
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return candidates[0]
+
+    def available(self) -> bool:
+        return self.path().is_file()
+
+
+HAND_MODEL = ModelAsset(
+    "hand",
+    MODEL_FILENAME,
+    MODEL_URL,
+    MODEL_SHA256,
+    MODEL_SIZE_BYTES,
+    "MediaPipe Hand Landmarker",
+    MODEL_ENV_VAR,
+    required=True,
+)
+SEGMENTER_MODEL = ModelAsset(
+    "segmenter",
+    "selfie_segmenter_landscape.tflite",
+    "https://storage.googleapis.com/mediapipe-models/image_segmenter/"
+    "selfie_segmenter_landscape/float16/1/selfie_segmenter_landscape.tflite",
+    "490e9ea734313e0de10fa0cd9e3c6133e36ea4db2b7a49bde9ef019f72796b8e",
+    250_177,
+    "MediaPipe Selfie Segmenter (landscape)",
+    "INTERACTIVE_SCROLLING_SEGMENTER_MODEL",
+)
+FACE_MODEL = ModelAsset(
+    "face",
+    "face_landmarker.task",
+    "https://storage.googleapis.com/mediapipe-models/face_landmarker/"
+    "face_landmarker/float16/1/face_landmarker.task",
+    "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+    3_758_596,
+    "MediaPipe Face Landmarker",
+    "INTERACTIVE_SCROLLING_FACE_MODEL",
+)
+MODELS = (HAND_MODEL, SEGMENTER_MODEL, FACE_MODEL)
+
+
 class ModelDownloadError(RuntimeError):
     """The model could not be downloaded or failed verification."""
 
@@ -46,14 +119,7 @@ def default_model_path() -> Path:
     The first existing file wins; if none exists the repository location is returned so
     error messages and downloads point to the expected place.
     """
-    env = os.environ.get(MODEL_ENV_VAR)
-    if env:
-        return Path(env)
-    candidates = [PROJECT_ROOT / "models" / MODEL_FILENAME, Path.cwd() / "models" / MODEL_FILENAME]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return candidates[0]
+    return HAND_MODEL.path()
 
 
 def sha256_of(path: Path) -> str:

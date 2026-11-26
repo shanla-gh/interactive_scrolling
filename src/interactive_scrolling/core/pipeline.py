@@ -142,6 +142,7 @@ class VisionPipeline:
         inference_max_width: int | None = None,
         gesture_engine: GestureEngine | None = None,
         on_gesture_event: Callable[[GestureEvent], None] | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         self._listener = listener
         self._inference_max_width = inference_max_width
@@ -150,6 +151,9 @@ class VisionPipeline:
         self._analyzer = MotionAnalyzer(motion_settings)
         self._gesture_engine = gesture_engine
         self._on_gesture_event = on_gesture_event
+        self._progress = progress or (lambda name: None)
+        self._frame_taps: list[Callable[[np.ndarray, int, int], None]] = []
+        """Called with "capture" / "processing" after every frame (stall attribution)."""
         self._gestures_enabled = False
         self._gesture_reset_requested = False
         self._gesture_stats = RollingStats(120)
@@ -330,6 +334,7 @@ class VisionPipeline:
                 self._frames_captured += 1
                 self._capture_rate.tick(frame.timestamp_ns)
                 self._mailbox.publish(_SessionFrame(session, frame))
+                self._progress("capture")
         except CameraError as exc:
             error = str(exc)
         except Exception as exc:
@@ -433,6 +438,11 @@ class VisionPipeline:
                 self._processing_stats.add(processed.processing_ms)
                 self._latency_stats.add(processed.latency_ms)
                 self._safe_call(self._listener.on_frame, processed)
+                for tap in self._frame_taps:
+                    # Optional presentation/analytics workers get the frame only after hand
+                    # tracking and gesture recognition are complete (read-only, non-blocking).
+                    self._safe_call(tap, image_rgb, frame.timestamp_ns, item.session)
+                self._progress("processing")
         finally:
             if loader is not None:
                 loader.join(timeout=30.0)
@@ -441,6 +451,12 @@ class VisionPipeline:
                 self._close_tracker(tracker)
 
     # ------------------------------------------------------------------ gestures
+
+    def add_frame_tap(self, tap: Callable[[np.ndarray, int, int], None]) -> None:
+        """Register ``tap(image_rgb, timestamp_ns, session)``, called for every processed frame
+        on the processing thread. Taps must return immediately and must not modify the image.
+        Register taps before ``launch``."""
+        self._frame_taps.append(tap)
 
     def set_gestures_enabled(self, enabled: bool) -> None:
         """Turn gesture recognition on or off. Thread-safe; any change resets the engine so no
