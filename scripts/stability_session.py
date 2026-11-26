@@ -28,11 +28,13 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
 from _measure import environment, summarize
+from interactive_scrolling.actions.types import ControlMode
 from interactive_scrolling.app import configure_logging
 from interactive_scrolling.config.settings import AppSettings
 from interactive_scrolling.core.diagnostics import ResourceMonitor
 from interactive_scrolling.core.pipeline import CameraState
 from interactive_scrolling.core.platform import disable_power_throttling
+from interactive_scrolling.services import offline_services
 from interactive_scrolling.ui.main_window import MainWindow
 from interactive_scrolling.ui.theme import apply_theme
 from interactive_scrolling.vision.camera import OpenCVCamera
@@ -57,7 +59,14 @@ def main() -> int:
     parser.add_argument("--minutes", type=float, default=10.0)
     parser.add_argument("--restart-every", type=float, default=120.0, help="seconds")
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--mode",
+        choices=[m.value for m in ControlMode if m is not ControlMode.LIVE_CONTROL],
+        default=ControlMode.GESTURE_TEST.value,
+        help="control mode during the session (live control is never enabled by this script)",
+    )
     args = parser.parse_args()
+    mode = ControlMode(args.mode)
 
     configure_logging("WARNING")
     warnings = WarningCollector()
@@ -72,6 +81,7 @@ def main() -> int:
         settings,
         camera_factory=OpenCVCamera,
         tracker_factory=lambda: MediaPipeHandTracker(settings.tracking, model),
+        services=offline_services(),
     )
     window.show()
     monitor = ResourceMonitor()
@@ -111,6 +121,9 @@ def main() -> int:
                 "display_fps": round(window.video.display_rate.rate(), 1),
                 "latency_ms": round(m.latency_ms, 1) if m.latency_ms else None,
                 "inference_ms": round(m.inference_ms, 1) if m.inference_ms else None,
+                "gesture_ms": round(window.pipeline.gesture_ms_mean, 3)
+                if window.pipeline.gesture_ms_mean is not None
+                else None,
                 "dropped_total": m.frames_dropped,
                 "hands": frame.tracking.hand_count if frame else None,
                 "cpu_percent_machine": round(r.cpu_percent_of_machine, 1),
@@ -188,6 +201,7 @@ def main() -> int:
     sampler.timeout.connect(sample)
     sampler.start()
     QTimer.singleShot(500, window.start_camera)
+    QTimer.singleShot(600, lambda: window.set_control_mode(mode))
     app.exec()
 
     running = [s for s in samples if s["camera"] == "running" and s["processing_fps"] > 0]
@@ -206,6 +220,9 @@ def main() -> int:
             "display_fps": summarize([s["display_fps"] for s in running]),
             "latency_ms": summarize([s["latency_ms"] for s in running if s["latency_ms"]]),
             "inference_ms": summarize([s["inference_ms"] for s in running if s["inference_ms"]]),
+            "control_mode": mode.value,
+            "gesture_ms": summarize([s["gesture_ms"] for s in running if s["gesture_ms"]]),
+            "gestures_recognized": window.history.rowCount(),
             "cpu_percent_of_machine": summarize([s["cpu_percent_machine"] for s in samples]),
             "rss_mb": summarize([s["rss_mb"] for s in samples]),
             "rss_first_minute_mean": round(sum(first_minute) / len(first_minute), 1)
