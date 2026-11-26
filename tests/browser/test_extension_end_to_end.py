@@ -74,6 +74,11 @@ def run(controller: YouTubeShortsController, action: ActionType):
     return controller.execute(action, uuid.uuid4().hex, 3.0)
 
 
+def seen_id(bridge: BridgeServer) -> str | None:
+    (client,) = bridge.clients()
+    return client.context.shorts.video_id if client.context and client.context.shorts else None
+
+
 def current_id(page: Session) -> str:
     return page.eval("location.pathname.split('/')[2]")
 
@@ -88,12 +93,14 @@ def test_extension_connects_with_fixed_id_and_reports_context(stack) -> None:
 
 
 def test_next_and_previous_navigate_exactly_one_short(stack) -> None:
-    _, _, controller, page = stack
+    _, bridge, controller, page = stack
     open_short(page, controller, "?signed_in=1")
     result = run(controller, ActionType.NEXT_SHORT)
     assert result.status is ActionStatus.SUCCEEDED
     assert current_id(page) == "bbbbbbbbbb2"
-    assert wait_until(lambda: controller.status().ready, timeout_s=5)
+    # Commands carry the Short the app last saw; wait until the new one has been reported,
+    # otherwise the extension (correctly) refuses the stale command.
+    assert wait_until(lambda: seen_id(bridge) == "bbbbbbbbbb2", timeout_s=5)
     result = run(controller, ActionType.PREVIOUS_SHORT)
     assert result.status is ActionStatus.SUCCEEDED
     assert current_id(page) == "aaaaaaaaaa1"
