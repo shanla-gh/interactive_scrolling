@@ -8,7 +8,7 @@ framework. Every settings object validates itself on construction and raises
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
@@ -149,6 +149,115 @@ class OverlaySettings:
     show_vectors: bool = True
 
 
+class ControlHandPreference(enum.Enum):
+    """Which hand may issue gesture commands."""
+
+    AUTO = "auto"
+    """The first hand that is alone in view becomes the control hand and keeps that role."""
+    LEFT = "left"
+    RIGHT = "right"
+
+
+class SensitivityPreset(enum.Enum):
+    LOW = "low"
+    BALANCED = "balanced"
+    HIGH = "high"
+    CUSTOM = "custom"
+
+
+# Thresholds scaled by a preset: lower sensitivity needs larger, faster, longer gestures.
+_PRESET_SCALES = {
+    SensitivityPreset.LOW: 1.25,
+    SensitivityPreset.BALANCED: 1.0,
+    SensitivityPreset.HIGH: 0.8,
+}
+_SCALED_FIELDS = (
+    "finger_swipe_min_distance_palms",
+    "finger_swipe_min_speed_palms_s",
+    "hand_sweep_min_distance_palms",
+    "hand_sweep_min_speed_palms_s",
+    "thumbs_up_hold_s",
+    "stop_hold_s",
+)
+
+_RANGES: dict[str, tuple[float, float]] = {
+    "finger_swipe_min_distance_palms": (0.3, 3.0),
+    "finger_swipe_min_speed_palms_s": (0.5, 10.0),
+    "finger_swipe_max_duration_s": (0.2, 2.0),
+    "hand_sweep_min_distance_palms": (0.5, 5.0),
+    "hand_sweep_min_speed_palms_s": (0.5, 12.0),
+    "hand_sweep_max_duration_s": (0.2, 2.0),
+    "direction_ratio": (1.0, 5.0),
+    "thumbs_up_hold_s": (0.1, 3.0),
+    "stop_hold_s": (0.1, 3.0),
+    "static_max_speed_palms_s": (0.1, 3.0),
+    "cooldown_s": (0.0, 5.0),
+    "return_window_s": (0.0, 3.0),
+    "global_cooldown_s": (0.0, 5.0),
+    "rearm_still_s": (0.0, 2.0),
+    "rearm_max_speed_palms_s": (0.1, 3.0),
+    "min_track_age_s": (0.0, 2.0),
+}
+
+
+@dataclass(frozen=True)
+class GestureSettings:
+    """Gesture recognition thresholds. Distances and speeds are in palm lengths.
+
+    One palm length is the measured wrist to middle-finger-MCP distance, so thresholds do not
+    depend on how far the hand is from the camera.
+    """
+
+    preset: SensitivityPreset = SensitivityPreset.BALANCED
+    finger_swipe_min_distance_palms: float = 0.8
+    finger_swipe_min_speed_palms_s: float = 2.0
+    finger_swipe_max_duration_s: float = 0.7
+    hand_sweep_min_distance_palms: float = 0.75
+    hand_sweep_min_speed_palms_s: float = 2.8
+    hand_sweep_max_duration_s: float = 0.9
+    direction_ratio: float = 1.8
+    """The main axis must exceed the cross axis by this factor (1.8 = within ~29 degrees)."""
+    thumbs_up_hold_s: float = 0.6
+    stop_hold_s: float = 0.8
+    static_max_speed_palms_s: float = 0.6
+    cooldown_s: float = 0.6
+    """Minimum time before the same gesture can be confirmed again."""
+    return_window_s: float = 1.0
+    """After a swipe, an opposite-direction swipe starting within this time after the swipe's
+    movement ended is treated as the hand's return movement and ignored."""
+    global_cooldown_s: float = 0.4
+    """After any confirmed gesture, no other gesture is confirmed for this time."""
+    rearm_still_s: float = 0.0
+    """How long the hand must stay below ``rearm_max_speed_palms_s`` before a new swipe can
+    start. 0 means one slow frame is enough: a stroke must begin from (near) rest, so a hand
+    that is already moving when it is acquired cannot trigger a swipe."""
+    rearm_max_speed_palms_s: float = 1.0
+    min_track_age_s: float = 0.3
+    control_hand: ControlHandPreference = ControlHandPreference.AUTO
+    enable_finger_swipes: bool = True
+    enable_hand_sweeps: bool = True
+    enable_thumbs_up: bool = True
+    enable_stop: bool = True
+
+    def __post_init__(self) -> None:
+        for name, (low, high) in _RANGES.items():
+            value = getattr(self, name)
+            if not isinstance(value, int | float) or not low <= value <= high:
+                raise ConfigError(f"{name} must be within [{low}, {high}], got {value!r}.")
+
+    @classmethod
+    def from_preset(cls, preset: SensitivityPreset, **overrides: object) -> GestureSettings:
+        """Defaults scaled for ``preset``; other fields (hand, enabled gestures) via overrides."""
+        if preset is SensitivityPreset.CUSTOM:
+            raise ConfigError("CUSTOM is not a preset; edit individual values instead.")
+        base = cls()
+        scale = _PRESET_SCALES[preset]
+        values: dict[str, object] = {name: getattr(base, name) * scale for name in _SCALED_FIELDS}
+        values.update(overrides)
+        values["preset"] = preset
+        return replace(base, **values)  # type: ignore[arg-type]
+
+
 @dataclass
 class AppSettings:
     """Top-level application settings."""
@@ -157,4 +266,5 @@ class AppSettings:
     tracking: TrackingSettings = field(default_factory=TrackingSettings)
     motion: MotionSettings = field(default_factory=MotionSettings)
     overlay: OverlaySettings = field(default_factory=OverlaySettings)
+    gestures: GestureSettings = field(default_factory=GestureSettings)
     mirror_preview: bool = True
