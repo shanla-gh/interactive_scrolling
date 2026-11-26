@@ -51,4 +51,8 @@ jobs:
       # Tests marked "hardware" need a physical webcam and are skipped here by design.
       # CI does not and cannot validate real webcam behaviour.
       - name: Tests
-        run: python -m pytest -ra
+        run: python -m pytest -ra --junitxml=reports/junit.xml
+
+      - name: Report failed tests as annotations
+        if: failure()
+        run: python scripts/junit_annotations.py reports/junit.xml
