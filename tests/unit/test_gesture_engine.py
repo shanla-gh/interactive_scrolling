@@ -633,3 +633,16 @@ def test_small_hand_gets_a_positioning_hint() -> None:
     assert any("closer" in f.hint for f in frames)
     _, frames = run([Hand(still(640, 400), palm_px=120)], 1.0)
     assert not any(f.hint for f in frames)
+
+
+def test_low_frame_rate_gets_a_hint() -> None:
+    _, frames = run([Hand(still(640, 400), palm_px=120)], 2.0, fps=12.0)
+    assert any("frame rate" in f.hint for f in frames[-5:])
+    _, frames = run([Hand(still(640, 400), palm_px=120)], 2.0, fps=30.0)
+    assert not any(f.hint for f in frames)
+
+
+def test_hand_swipes_work_at_15_fps() -> None:
+    """Brief 004 frame-rate check: hand movements stayed 8/8 at 15 fps on the recordings."""
+    events, _ = run([swipe_down(distance=150, duration=0.35)], 2.0, fps=15.0)
+    assert kinds(events) == ["INDEX_SWIPE_DOWN"]

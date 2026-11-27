@@ -70,6 +70,9 @@ MIN_HAND_SCALE_FRACTION = 0.045
 """Below this hand size (fraction of the image width; ~58 px at 1280 px) landmark jitter
 dominates small movements and the stop pose is often lost: the user is told to come closer."""
 EDGE_MARGIN_FRACTION = 0.04
+LOW_FPS = 20.0
+"""Below this frame rate small finger flicks are undersampled (Brief 004: an upward flick
+measured 0.53 instead of 0.82 hand lengths at 15 fps; hand movements still worked 8/8)."""
 
 
 class GestureEngine:
@@ -89,6 +92,7 @@ class GestureEngine:
         self._blocked_until_ns = 0
         self._labels: dict[int, deque[tuple[Handedness, float | None]]] = {}
         self._last_seen_ns: int | None = None
+        self._frame_times: deque[int] = deque(maxlen=31)
 
     @property
     def settings(self) -> GestureSettings:
@@ -140,6 +144,14 @@ class GestureEngine:
     def set_profile(self, profile: CalibrationProfile | None) -> None:
         """Personal calibration results (thread-safe enough: one reference assignment)."""
         self.profile = profile
+
+    def frame_rate(self) -> float | None:
+        """Frames per second over the last second of frames (``None`` until known)."""
+        times = self._frame_times
+        if len(times) < 10:
+            return None
+        span = (times[-1] - times[0]) / NS_PER_S
+        return (len(times) - 1) / span if span > 0 else None
 
     def _apply_enabled(self) -> None:
         s = self._settings
@@ -251,6 +263,7 @@ class GestureEngine:
             self._apply_enabled()
 
         ts = tracking.timestamp_ns
+        self._frame_times.append(ts)
         self._observe_labels(tracking, motion)
         hand, status, detail = self._select(tracking, motion)
         rejection: GestureRejection | None = None
@@ -293,6 +306,8 @@ class GestureEngine:
         observation = tracking.hands[hand.observation_index]
         pose = analyze_pose(observation, tracking.image_width, tracking.image_height)
         hint = positioning_hint(pose.scale_px, observation, tracking.image_width)
+        if not hint and self.frame_rate() is not None and self.frame_rate() < LOW_FPS:
+            hint = "Low camera frame rate: more light helps; move the hand, not only the finger"
         length = hand.palm_length_px
         sample = HandSample(
             timestamp_ns=ts,

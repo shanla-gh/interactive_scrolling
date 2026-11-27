@@ -115,9 +115,11 @@ MAX_REST_AGE_S = 0.25
 POSE_WINDOW_S = 0.25
 """``pose_rule="endpoints"``: the pose shown this long before a stroke starts counts."""
 ORIGIN_POSE_FRACTION = 0.6
-ORIGIN_POSE_MIN_FRAMES = 3
-"""Pointing before the stroke must be sustained (a single stray "pointing" frame during
-ordinary hand movement is common in the recordings and caused false swipes)."""
+ORIGIN_POSE_MIN_S = 0.06
+"""Pointing before the stroke must be sustained - seen over at least this time span and in
+``ORIGIN_POSE_FRACTION`` of the frames (a single stray "pointing" frame during ordinary hand
+movement is common in the recordings and caused false swipes). Time based, so it means the
+same at 15 and at 30 frames per second."""
 ENDPOINT_POSE_FRACTION = 0.5
 FLICK_REEXTEND_S = 0.8
 """A curled-finger flick is confirmed only if the finger recovers within this time: it is
@@ -436,9 +438,11 @@ class DirectionalSwipeRecognizer:
 
     def _recent_pose(self, ts: int) -> bool:
         cutoff = ts - int(POSE_WINDOW_S * NS_PER_S)
-        window = [ok for t, ok in self._pose_history if t >= cutoff]
-        hits = sum(window)
-        return hits >= ORIGIN_POSE_MIN_FRAMES and hits >= ORIGIN_POSE_FRACTION * len(window)
+        window = [(t, ok) for t, ok in self._pose_history if t >= cutoff]
+        hits = [t for t, ok in window if ok]
+        if len(hits) < 2 or len(hits) < ORIGIN_POSE_FRACTION * len(window):
+            return False
+        return _seconds(hits[-1] - hits[0]) >= ORIGIN_POSE_MIN_S
 
     def _pose_accepted(self, stroke: _Stroke, pose_now: bool) -> str:
         """ "now" (confirm), "flick" (wait for the finger to extend again) or "" (reject)."""
