@@ -695,6 +695,8 @@ class DirectionalSwipeRecognizer:
             # A rejected stroke may flow directly into a real one, so the recognizer is
             # immediately idle again.
             self._stroke = None
+            if stroke.blocked == RejectCode.NOT_ACTIVATED:
+                return Step()  # never activated: nothing to explain
             return Step(
                 rejection=GestureRejection(
                     gesture, reason, ts, code, _round(measured), _round(required), unit
@@ -710,6 +712,13 @@ class DirectionalSwipeRecognizer:
                 return reject(
                     RejectCode.TOO_SLOW, "too slow", peak, s.swipe_min_speed_palms_s, "palms/s"
                 )
+            if stroke.blocked == RejectCode.NOT_ACTIVATED:
+                straight = d_cross * s.direction_ratio <= d_axis
+                held = stroke.pose_frames / stroke.frames >= ENDPOINT_POSE_FRACTION
+                if stroke.onset_seen and straight and held:
+                    self._remember(stroke, d_axis, ts, confirmed=False)
+                stroke.observed = True
+                return Step()
             palm_share = 0.0
             if d_axis > 0:
                 palm_move = self._displacement(sample.palm, stroke.palm_start, scale)
@@ -942,12 +951,17 @@ class DirectionalSwipeRecognizer:
         ts = sample.timestamp_ns
         if self.options.pose_rule == "fraction" and not pose_now:
             return Step()
+        activated = True
         if self.detector.require_origin and not (
             self._recent_pose(ts) and self._was_still(start_ns, sample)
         ):
-            # A fist/palm detector only follows movements that start from its held, still
-            # pose; anything else belongs to another detector (and is not explained here).
-            return Step()
+            # A fist/palm detector confirms only movements that start from its held, still pose.
+            # A movement of the same hand shape without that cue is followed silently and, if
+            # it is a full stroke, remembered: its return (often made after a pause, which looks
+            # like an activation) must not become the opposite swipe. Other shapes are ignored.
+            if not pose_now:
+                return Step()
+            activated = False
         scale = self._current_scale(sample)
         if self.options.scale == "stroke_max":
             scale = sample.palm_length_px
@@ -958,7 +972,7 @@ class DirectionalSwipeRecognizer:
             start_pos=start_pos,
             palm_start=sample.palm,
             scale_px=scale,
-            blocked=self._blocked_code(ts),
+            blocked=self._blocked_code(ts) if activated else RejectCode.NOT_ACTIVATED,
             origin_pose=self._recent_pose(ts),
             is_return=self._is_return(gesture, ts),
             pose_frames=int(pose_now),

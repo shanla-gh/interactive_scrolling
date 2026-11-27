@@ -72,7 +72,9 @@ _ACTIVITY_KINDS = {
 log = logging.getLogger(__name__)
 
 MAX_STORED_REJECTIONS_PER_MIN = 60
-_NOT_STORED = frozenset({"tracking_lost", "hand_changed", "ambiguous_hand", "blocked", "cancelled"})
+_NOT_STORED = frozenset(
+    {"tracking_lost", "hand_changed", "ambiguous_hand", "blocked", "cancelled", "not_activated"}
+)
 
 
 def _worth_storing(rejection) -> bool:  # type: ignore[no-untyped-def]

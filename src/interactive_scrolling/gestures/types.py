@@ -156,6 +156,7 @@ class RejectCode:
     RETURN = "return"
     COOLDOWN = "cooldown"
     NOT_ARMED = "not_armed"
+    NOT_ACTIVATED = "not_activated"
     DISABLED = "disabled"
     HAND_MOVING = "hand_moving"
     RELEASED = "released"
