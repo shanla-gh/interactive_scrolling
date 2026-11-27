@@ -10,6 +10,7 @@ from interactive_scrolling.gestures.calibration import (
     derive,
 )
 from interactive_scrolling.gestures.engine import GestureEngine
+from interactive_scrolling.gestures.recognizers import swipe_distance
 from interactive_scrolling.gestures.types import GestureType
 from interactive_scrolling.vision.landmarks import TrackingResult
 from tests.gesture_helpers import (
@@ -91,8 +92,10 @@ def test_small_swipes_lower_the_distance_within_bounds() -> None:
     derived = derive({G.INDEX_SWIPE_UP: up, G.INDEX_SWIPE_DOWN: down}, GestureSettings())
     s = derived.settings
     assert s.preset is SensitivityPreset.PERSONAL
-    assert MIN_DISTANCE <= s.swipe_min_distance_palms < GestureSettings().swipe_min_distance_palms
-    assert s.swipe_min_distance_palms <= 0.9 * min(d.length_palms for d in up.demos + down.demos)
+    for direction, result in ((G.INDEX_SWIPE_UP, up), (G.INDEX_SWIPE_DOWN, down)):
+        distance = swipe_distance(s, direction)
+        assert MIN_DISTANCE <= distance < GestureSettings().swipe_min_distance_palms
+        assert distance <= 0.9 * min(d.length_palms for d in result.demos)
     # The calibrated engine recognizes the same small swipes.
     events, _ = run([three_strokes(0, -1, 0.7)], 4.5, engine=GestureEngine(s))
     assert [e.gesture for e in events] == [G.INDEX_SWIPE_UP] * 3
@@ -137,5 +140,49 @@ def test_very_small_swipes_keep_the_safe_minimum_and_say_so() -> None:
     up = measure(G.INDEX_SWIPE_UP, three_strokes(0, -1, 0.45), 4.5)
     down = measure(G.INDEX_SWIPE_DOWN, three_strokes(0, 1, 0.45), 4.5)
     derived = derive({G.INDEX_SWIPE_UP: up, G.INDEX_SWIPE_DOWN: down}, GestureSettings())
-    assert derived.settings.swipe_min_distance_palms == MIN_DISTANCE
+    assert swipe_distance(derived.settings, G.INDEX_SWIPE_UP) == MIN_DISTANCE
+    assert swipe_distance(derived.settings, G.INDEX_SWIPE_DOWN) == MIN_DISTANCE
     assert any("very small" in note for note in derived.notes)
+
+
+def test_returns_do_not_raise_the_distance_but_opposite_wind_ups_do() -> None:
+    """Brief 005: whole-hand returns are as large as the swipe (suppressed by the recognizer
+    anyway) and must not raise the distance; a downward wind-up before the first upward swipe
+    moves like a downward swipe and sets the floor for "down"."""
+    up = measure(G.INDEX_SWIPE_UP, three_strokes(0, -1, 1.0), 4.5)
+    down = measure(G.INDEX_SWIPE_DOWN, three_strokes(0, 1, 0.7), 4.5)
+    assert up.returns and up.windups == []
+    plain = derive({G.INDEX_SWIPE_UP: up, G.INDEX_SWIPE_DOWN: down}, GestureSettings())
+    assert swipe_distance(plain.settings, G.INDEX_SWIPE_DOWN) <= 0.7 * 0.7 + 0.05
+    windup = up.returns[0]
+    up.windups = [windup]
+    floored = derive({G.INDEX_SWIPE_UP: up, G.INDEX_SWIPE_DOWN: down}, GestureSettings())
+    expected = min(1.15 * windup.length_palms, 0.9 * min(d.length_palms for d in down.demos))
+    assert swipe_distance(floored.settings, G.INDEX_SWIPE_DOWN) >= round(expected, 2) - 0.01
+
+
+def test_fist_demonstrations_set_the_fist_distance() -> None:
+    from tests.gesture_helpers import FIST
+
+    def fist_strokes(dy: float) -> Hand:
+        hand = three_strokes(0, dy, 0.6)
+        hand.pose = lambda t: FIST
+        return hand
+
+    collector_results = {}
+    for direction, dy in ((G.INDEX_SWIPE_UP, -1), (G.INDEX_SWIPE_DOWN, 1)):
+        c = CalibrationCollector()
+        c.begin(direction, detector="fist")
+        hand = fist_strokes(dy)
+        for i in range(int(4.5 * FPS)):
+            t = i / FPS
+            obs = (make_observation(hand.pose(t), hand.position(t), hand.palm_px),)
+            c.observe(TrackingResult(i, int(1e9 + t * 1e9), 1280, 720, obs))
+        collector_results[direction] = c.end()
+        assert collector_results[direction].valid_demos == 3
+    derived = derive({}, GestureSettings(), fist_results=collector_results)
+    assert (
+        0.3
+        <= derived.settings.fist_swipe_distance_palms
+        <= GestureSettings().fist_swipe_distance_palms
+    )

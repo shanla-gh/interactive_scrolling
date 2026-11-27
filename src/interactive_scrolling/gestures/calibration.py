@@ -63,6 +63,7 @@ from interactive_scrolling.gestures.recognizers import (
     STATIC_MAX_DRIFT_PALMS,
     STATIC_WINDOW_S,
     SWIPE_DIRECTIONS,
+    swipe_distance,
     to_user,
 )
 from interactive_scrolling.gestures.types import GestureType
@@ -82,6 +83,8 @@ MIN_HOLD_S = 0.4
 OUTLIER_FACTOR = 2.5
 CALIBRATION_METHOD = 2
 MAX_RAISE = 1.15
+FIST_MIN_DISTANCE = 0.3
+FIST_MAX_DISTANCE = 0.8
 """Calibration may raise a distance by at most 15 % (only when wind-ups require it)."""
 WINDUP_OUTLIER_FACTOR = 1.5
 AXES = {
@@ -118,8 +121,11 @@ class PromptResult:
     """Measurements of one prompt (e.g. "move your finger up, 3 times")."""
 
     gesture: GestureType
+    detector: str = "finger"
+    """``finger`` (index fingertip) or ``fist`` (palm centre of a closed hand)."""
     demos: list[Stroke] = field(default_factory=list)
     windups: list[Stroke] = field(default_factory=list)
+    returns: list[Stroke] = field(default_factory=list)
     holds: list[HeldPose] = field(default_factory=list)
     other: list[Stroke] = field(default_factory=list)
     frames: int = 0
@@ -166,7 +172,11 @@ class PromptResult:
                 else:
                     out.append("No movement detected.")
             elif any(not (s.pointing_before or s.pointing_after) for s in self.demos):
-                out.append("Point with your index finger while you move.")
+                out.append(
+                    "Close your hand into a fist, hold it still briefly, then move it."
+                    if self.detector == "fist"
+                    else "Point with your index finger while you move."
+                )
         else:
             if not self.holds:
                 out.append("Hold the pose still for a moment.")
@@ -356,10 +366,10 @@ class CalibrationCollector:
         with self._lock:
             return self._gesture is not None
 
-    def begin(self, gesture: GestureType) -> None:
+    def begin(self, gesture: GestureType, detector: str = "finger") -> None:
         with self._lock:
             self._gesture = gesture
-            self._result = PromptResult(gesture)
+            self._result = PromptResult(gesture, detector)
             self._segmenter = _Segmenter()
             self._holds = _Holds()
 
@@ -396,7 +406,15 @@ class CalibrationCollector:
             pose = analyze_pose(obs, tracking.image_width, tracking.image_height)
             result.tracked += 1
             result.scales.append(pose.scale_px)
-            if result.gesture in SWIPES:
+            if result.gesture in SWIPES and result.detector == "fist":
+                self._segmenter.add(
+                    tracking.timestamp_ns,
+                    hand.palm.position_px,
+                    hand.palm.velocity_px_s,
+                    pose.scale_px,
+                    pose.label is PoseLabel.FIST,
+                )
+            elif result.gesture in SWIPES:
                 self._segmenter.add(
                     tracking.timestamp_ns,
                     hand.fingertip.position_px,
@@ -409,7 +427,7 @@ class CalibrationCollector:
 
 
 def _classify(result: PromptResult, strokes: list[Stroke], holds: list[HeldPose]) -> None:
-    result.demos, result.windups, result.other = [], [], []
+    result.demos, result.windups, result.other, result.returns = [], [], [], []
     result.holds = list(holds)
     if result.gesture not in SWIPES:
         return
@@ -433,6 +451,7 @@ def _classify(result: PromptResult, strokes: list[Stroke], holds: list[HeldPose]
             # Only a stroke right before the first demonstration can be a wind-up.
             after_a_demo = any(s.start_ns >= d.end_ns for d in demos)
             if after_a_demo:
+                result.returns.append(s)
                 continue
             if first_demo is not None and 0 <= first_demo - s.end_ns <= gap_w:
                 result.windups.append(s)
@@ -448,72 +467,116 @@ class Derived:
     """What was changed or why something was kept (plain language)."""
 
 
+def _direction_distance(
+    direction: GestureType,
+    results: dict[GestureType, PromptResult],
+    current: float,
+    notes: list[str],
+    label: str,
+) -> tuple[float, list[Stroke]] | None:
+    """Personal distance for one direction, or ``None`` without enough demonstrations."""
+    result = results.get(direction)
+    if result is None or len(result.demos) < 2:
+        return None
+    typical = statistics.median(s.length_palms for s in result.demos)
+    # Raising the hand into position or lowering it is not a demonstration (or a wind-up).
+    demos = [s for s in result.demos if s.length_palms <= OUTLIER_FACTOR * typical]
+    lengths = [s.length_palms for s in demos]
+    # Movements in this direction that must NOT trigger it: wind-ups before the demonstrations
+    # of this direction and of the opposite one (a downward curl before an upward flick moves
+    # like a downward flick). Returns are not used: the recognizer suppresses them anyway, and
+    # whole-hand returns (as large as the swipe) raised the distance so far that small flicks
+    # failed in the cross-session simulation (0/8).
+    opposite = results.get(_opposite(direction))
+    unwanted = list(result.windups)
+    if opposite is not None:
+        unwanted += [s for s in opposite.windups if s.direction is direction]
+    unwanted = [s for s in unwanted if s.length_palms <= WINDUP_OUTLIER_FACTOR * typical]
+    # Lower the distance for small movements; raise it only as far as unwanted movements
+    # require and at most by MAX_RAISE (a higher distance punishes any later change of style).
+    distance = min(0.7 * statistics.median(lengths), current)
+    ceiling = min(0.9 * min(lengths), MAX_RAISE * current)
+    floor = 1.15 * max((s.length_palms for s in unwanted), default=0.0)
+    if floor > ceiling:
+        notes.append(
+            f"{label}: the movement back is about as large as your swipe; make the swipe a "
+            "little larger than the movement back."
+        )
+        distance = ceiling
+    else:
+        distance = min(max(distance, floor), ceiling)
+    if distance < MIN_DISTANCE:
+        notes.append(
+            f"{label}: your movements are very small; the distance stays at the safe minimum "
+            f"of {MIN_DISTANCE:.2f} hand lengths - move a little further."
+        )
+    distance = round(min(max(distance, MIN_DISTANCE), MAX_DISTANCE), 2)
+    notes.append(
+        f"{label}: distance {distance:.2f} hand lengths "
+        f"(your swipes {min(lengths):.2f}-{max(lengths):.2f})."
+    )
+    return distance, demos
+
+
+DIRECTION_FIELDS = {
+    G.INDEX_SWIPE_UP: ("swipe_up_distance_palms", "Finger up"),
+    G.INDEX_SWIPE_DOWN: ("swipe_down_distance_palms", "Finger down"),
+    G.INDEX_SWIPE_LEFT: ("swipe_left_distance_palms", "Finger left"),
+    G.INDEX_SWIPE_RIGHT: ("swipe_right_distance_palms", "Finger right"),
+}
+
+
 def derive(
-    results: dict[GestureType, PromptResult], base: GestureSettings, hand: str = ""
+    results: dict[GestureType, PromptResult],
+    base: GestureSettings,
+    hand: str = "",
+    fist_results: dict[GestureType, PromptResult] | None = None,
 ) -> Derived:
+    """Bounded personal settings from the measured prompts (see the module documentation).
+
+    Finger distances are derived per direction (Brief 005: up and down need not be alike);
+    a direction with fewer than two usable demonstrations keeps its current value."""
     notes: list[str] = []
-    values: dict[str, float] = {}
+    changes: dict[str, object] = {}
     peaks: list[float] = []
     durations: list[float] = []
-    for axis, gestures in AXES.items():
-        demos = [s for g in gestures if g in results for s in results[g].demos]
-        windups = [s for g in gestures if g in results for s in results[g].windups]
-        if len(demos) < 2:
-            notes.append(f"{axis.capitalize()} swipes: not enough demonstrations, unchanged.")
-            continue
-        typical = statistics.median(s.length_palms for s in demos)
-        # Raising the hand into position or lowering it is not a demonstration (or a wind-up).
-        demos = [s for s in demos if s.length_palms <= OUTLIER_FACTOR * typical]
-        windups = [s for s in windups if s.length_palms <= WINDUP_OUTLIER_FACTOR * typical]
-        lengths = [s.length_palms for s in demos]
-        # Lower the distance for small movements; raise it only as far as the user's own
-        # wind-ups require (a higher distance would punish any later change of style).
-        current = (
-            base.swipe_min_distance_palms
-            if axis == "vertical" or not base.swipe_horizontal_distance_palms
-            else base.swipe_horizontal_distance_palms
+    for direction, (field_name, label) in DIRECTION_FIELDS.items():
+        derived = _direction_distance(
+            direction, results, swipe_distance(base, direction), notes, label
         )
-        distance = min(0.7 * statistics.median(lengths), current)
-        ceiling = min(0.9 * min(lengths), MAX_RAISE * current)
-        floor = min(1.15 * max((s.length_palms for s in windups), default=0.0), ceiling)
-        if floor > ceiling:
-            notes.append(
-                f"{axis.capitalize()} swipes: the movement before your swipe is about as large "
-                "as the swipe itself; make the swipe a little larger than the movement before "
-                "it."
-            )
-            distance = ceiling
-        else:
-            distance = min(max(distance, floor), ceiling)
-        if distance < MIN_DISTANCE:
-            notes.append(
-                f"{axis.capitalize()} swipes: your movements are very small; the distance stays at "
-                f"the safe minimum of {MIN_DISTANCE:.2f} hand lengths - move a little further."
-            )
-        distance = round(min(max(distance, MIN_DISTANCE), MAX_DISTANCE), 2)
-        values[axis] = distance
+        if derived is None:
+            if direction in results:
+                notes.append(f"{label}: not enough demonstrations, unchanged.")
+            continue
+        changes[field_name], demos = derived
         peaks += [s.peak_palms_s for s in demos]
         durations += [s.duration_s for s in demos]
-        notes.append(
-            f"{axis.capitalize()} swipes: distance {distance:.2f} hand lengths "
-            f"(your swipes {min(lengths):.2f}-{max(lengths):.2f})."
+    fist_distances = []
+    for direction in DIRECTION_FIELDS:
+        label = f"Fist {direction.value.rsplit('_', 1)[1]}"
+        derived = _direction_distance(
+            direction, fist_results or {}, base.fist_swipe_distance_palms, notes, label
+        )
+        if derived is not None:
+            fist_distances.append(derived[0])
+    if fist_distances:
+        # One shared fist distance (palm-centre travel); the most demanding direction decides
+        # so that no direction becomes easier than its own movements allow.
+        changes["fist_swipe_distance_palms"] = round(
+            min(max(max(fist_distances), FIST_MIN_DISTANCE), FIST_MAX_DISTANCE), 2
         )
     settings = base
-    if values:
-        vertical = values.get("vertical", base.swipe_min_distance_palms)
-        horizontal = values.get("horizontal", 0.0)
-        # The speed is only ever lowered (fast demonstrations must not make slower everyday
-        # swipes fail).
-        speed = round(min(max(0.5 * min(peaks), 1.2), base.swipe_min_speed_palms_s), 2)
-        duration = round(min(max(1.3 * max(durations), base.swipe_max_duration_s), 1.0), 2)
-        settings = replace(
-            settings,
-            preset=SensitivityPreset.PERSONAL,
-            swipe_min_distance_palms=vertical,
-            swipe_horizontal_distance_palms=0.0 if horizontal == vertical else horizontal,
-            swipe_min_speed_palms_s=speed,
-            swipe_max_duration_s=duration,
-        )
+    if changes:
+        if peaks:
+            # The speed is only ever lowered (fast demonstrations must not make slower
+            # everyday swipes fail).
+            changes["swipe_min_speed_palms_s"] = round(
+                min(max(0.5 * min(peaks), 1.2), base.swipe_min_speed_palms_s), 2
+            )
+            changes["swipe_max_duration_s"] = round(
+                min(max(1.3 * max(durations), base.swipe_max_duration_s), 1.0), 2
+            )
+        settings = replace(settings, preset=SensitivityPreset.PERSONAL, **changes)
     profile = CalibrationProfile(
         created=datetime.now().isoformat(timespec="minutes"), hand=hand, method=CALIBRATION_METHOD
     )
