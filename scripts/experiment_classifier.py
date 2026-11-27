@@ -101,7 +101,7 @@ def strokes(path: Path) -> list[tuple[np.ndarray, int, bool]]:
 
 
 def rule(features: np.ndarray, settings: GestureSettings) -> bool:
-    length, peak, duration, before, after, diagonal = features
+    length, peak, _duration, before, after, diagonal = features
     return (
         length >= settings.swipe_min_distance_palms
         and peak >= settings.swipe_min_speed_palms_s
