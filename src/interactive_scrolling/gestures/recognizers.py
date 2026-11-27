@@ -745,7 +745,9 @@ class DirectionalSwipeRecognizer:
             if stroke.blocked == RejectCode.NOT_ACTIVATED:
                 straight = d_cross * s.direction_ratio <= d_axis
                 held = stroke.pose_frames / stroke.frames >= ENDPOINT_POSE_FRACTION
-                if stroke.onset_seen and straight and held:
+                # A return of the previous swipe is never remembered as a stroke of its own:
+                # the next swipe in the original direction would become *its* return.
+                if stroke.onset_seen and straight and held and not stroke.is_return:
                     self._remember(stroke, d_axis, ts, confirmed=False)
                 stroke.observed = True
                 return Step()
