@@ -326,3 +326,34 @@ Each record states the decision, the alternatives considered and the trade-offs.
   locally (no images, at most 60 per minute).
 * **Why**: one recorded false swipe from lowering the hand; 7 of 13 of the Director's downward
   swipes were boundary refusals that looked like failures; missed attempts were invisible.
+
+## ADR-036 Ignore momentary duplicate detections of the control hand (Brief 006)
+
+* **Decision**: a second hand overlapping the established control hand and tracked for less
+  than 0.3 s is ignored; a second hand that stays close still suspends recognition.
+* **Evidence**: 59 duplicate frames in four recordings, mostly mid-swipe; they cancelled the
+  Director's downward swipes and caused a phase lock (extensions fired as UP). Downward finger
+  swipes 9/13 (3 wrong) -> 13/13; held-out left hand 5/5.
+
+## ADR-037 Any hand shape by default; motion reference chosen at the onset
+
+* **Decision**: pointing onset -> fingertip path (0.5 rules); any other onset shape except the
+  half-heart and the stop pose -> palm-centre path activated by a 0.4 s settled hand; the shape
+  may change during the stroke. "Pointing finger only" stays available. Settings v5 migrates
+  the 0.5 styles once, with a notice.
+* **Why**: the Director's objective; real use showed downward attempts with a non-pointing
+  hand failing on the pose check. **Cost**: ordinary-activity false events 6 -> 11 in 249 s;
+  whole-hand recall 33/44 on development data, 5/16 in the held-out look.
+
+## ADR-038 Do not measure motion across tracking gaps
+
+* **Decision**: no stroke starts across a gap > 0.1 s; implausible jumps end a stroke; no
+  decision on the frame after a gap.
+* **Evidence**: a recorded rest "swipe" from a hand lost and re-acquired two hand lengths away.
+
+## ADR-039 Rejected in Brief 006
+
+Faster-stroke-wins intent (session 2 contradicts it), ballistic activation (+4 false), chained
+rearming (no effect), near-miss return memory (finger up 8/8 -> 4/8), 34 deg angle tolerance
+(no gain), capture sample-time timestamps (no gain), optical flow and a short-window detector
+(no evidence of the gap they would bridge), 60 fps (the camera delivers 30).

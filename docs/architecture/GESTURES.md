@@ -101,6 +101,35 @@ and rejected (natural pauses between stroke and return are 0.2-0.37 s).
 
 **Tracking dropouts.** Gaps of up to 0.2 s (fast movements blur) keep the current candidate.
 
+### Any hand shape (Brief 006, default)
+
+"Swipe with: any hand shape" runs two motion references through the same lifecycle; which one
+measures a stroke is decided by the hand's geometry **at the onset**, so the user never chooses
+a pose:
+
+| Onset shape | Reference | Intent gating | Distance |
+|---|---|---|---|
+| pointing | index fingertip (finger detector, unchanged from 0.5; finger flicks wait for the finger to recover unless the palm moved with it) | pointing at the threshold or held before | `swipe_*_distance_palms` (0.8) |
+| any other shape except the half-heart and the stop pose (`hand_shape`) | palm centre (`HAND` detector) | the palm was settled (drift <= 0.25 hand lengths) for 0.4 s before the movement | `fist_swipe_distance_palms` (0.5, "whole-hand swipe distance") |
+
+During a whole-hand stroke the shape may change freely (a fist may open). Strokes may not start
+while the hand is partly out of view at the bottom (lowest landmark > 0.92); a downward
+whole-hand stroke is confirmed when the hand stops (or 0.6 s after the distance was reached)
+while still tracked, so a hand lowered out of the picture is lost first and never confirmed.
+Moving the hand away after a half-heart or a stop pose is a release, not a swipe.
+"Pointing finger only" keeps the 0.5 behaviour (fewer accidental swipes, see the benchmark).
+
+**Tracking quality rules (all detectors).** A second hand that overlaps the established control
+hand and has been tracked for less than 0.3 s is a duplicate detection of the same blurred hand
+and is ignored (it used to cancel fast swipes). A stroke never starts across a tracking gap
+(> 0.1 s between samples: the displacement was not observed); a jump across a gap implying more
+than 25 hand lengths/s, or more than 1 hand length between two frames on the whole-hand path,
+ends the stroke; no confirmation or reversal is decided on the single frame after a gap.
+
+**What motion cannot tell.** Raising the hand to get ready for a downward swipe is the same
+movement as an upward swipe (trajectory, speed and position measured alike); the settled-hand
+cue is the only separation. Hold the hand still for a moment before swiping.
+
 ### Motion-first engine (Brief 005)
 
 All swipes run through one motion engine (`DirectionalSwipeRecognizer`) with three detector
@@ -209,6 +238,13 @@ The recognition strategies themselves are `RecognizerOptions` (`V03_OPTIONS` rep
 version 0.3 for the benchmark).
 
 ## Known limitations
+
+* Brief 006: whole-hand swipes depend on holding the hand still for a moment first; rhythmic
+  repeated whole-hand swipes without a pause are partly ignored (left-hand fist swipes 5/16 in
+  the held-out look). The preparation raise before a downward whole-hand swipe can be taken as
+  an upward swipe.
+* Below ~20 fps or with frame loss, a missed upward finger flick can let its return be read as
+  a downward swipe (synthetic degradations, benchmark 006).
 
 * Fist control has no real recording; its numbers are semi-synthetic (Brief 005 benchmark).
 * Finger curl flicks downwards remain ambiguous with the return of an upward flick; they wait

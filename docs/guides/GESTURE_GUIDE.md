@@ -31,7 +31,13 @@ movement of the hand all work. Then let the hand come back; the movement back is
 * To go back the other way (for example next, then previous), let your hand come back to where
   it started and pause for a moment before the opposite swipe.
 
-**Fist swipes (experimental, version 0.5).** Instead of pointing you can close your hand
+**Any hand shape (version 0.6, default).** Point, make a fist or use an open or relaxed
+hand - it does not matter. Hold the hand still for a moment (less than half a second), then
+move it a little up, down, left or right; a turn of the wrist is enough. A pointing finger can
+also just flick. If accidental swipes happen while you use your hands for other things, choose
+**Gesture settings -> Swipe with -> Pointing finger only**.
+
+**Fist swipes (version 0.5, now part of "any hand shape").** Instead of pointing you can close your hand
 into a fist, hold it still for a moment (a quarter of a second is enough), then move it a
 little up, down, left or right - a turn of the wrist works. Switch them on in **Gesture
 settings -> Swipe with -> Finger or fist**, or try them first in **Practice -> Swipe method: Fist

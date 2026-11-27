@@ -30,6 +30,17 @@ between them.
    recognition** goes back to the Balanced preset (your gesture-to-action mapping and hand
    choice are kept).
 
+## Version 0.6 changes
+
+* The swipe method on the start page is **Pointing finger** (fingertip distances per
+  direction) or **Whole hand, any shape** (the distance the centre of the hand moves, used for
+  every hand shape that is not pointing). Practice accepts a swipe in the asked direction
+  however the hand is shaped when "any hand shape" is set.
+* Measured on the Director's recordings (calibrating on one hand, testing on the other), the
+  personal whole-hand distance gave the same results as the standard one: if whole-hand swipes
+  are missed, holding the hand still for a moment before the movement helps more than
+  calibrating.
+
 ## Version 0.5 changes
 
 * **Repaired:** in version 0.4 a pause at the end of a swipe followed by a slow return could

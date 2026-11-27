@@ -4,10 +4,26 @@ Source of truth for the current state of the project. Update it with every check
 
 | | |
 |---|---|
-| Version | 0.5.0b1 - beta, **not released** (no tag) |
-| Active work | Engineering Brief 005 (motion-first gestures) implemented; **Director validation pending** |
+| Version | 0.6.0b1 - beta, **not released** (no tag) |
+| Active work | Engineering Brief 006 (pose-independent motion) implemented; **Director validation pending** |
 | Engineering decision | PARTIALLY READY - TARGETED PHYSICAL DATA REQUIRED |
 | Last updated | 2026-11-27 |
+
+## Brief 006 in one paragraph
+
+The Director's session-5 recordings confirmed that downward finger swipes failed (5/10, with
+7 events in the wrong direction). The main cause was not the recognizer's rules but tracking:
+during fast movements MediaPipe reports the blurred hand twice for a few frames, which
+cancelled the swipe and locked the recognizer into the wrong phase. With duplicates ignored,
+downward finger swipes are 18/18 on all recordings (held-out left hand 5/5). Real use of 0.5
+also showed downward attempts failing because the hand was not pointing, so swipes now work
+with any hand shape by default: pointing hands as before, other shapes at the centre of the
+hand after a brief pause. That path is weaker (33/44 on development data, 5/16 in the one
+held-out look) and raises accidental swipes in ordinary activity (11 instead of 6 in 249 s);
+"pointing finger only" remains. Details: [Brief 006 report](docs/milestones/BRIEF_006_REPORT.md),
+[benchmark 006](docs/benchmarks/GESTURE_BENCHMARK_006.md),
+[Audit 008](docs/audits/INTEGRATION_AUDIT_008.md),
+[validation](docs/milestones/BRIEF_006_VALIDATION.md).
 
 ## Brief 005 in one paragraph
 
@@ -38,44 +54,48 @@ Details: [Brief 005 report](docs/milestones/BRIEF_005_REPORT.md),
 | Integration Audit 006 | technical PASS; not a full pass | [Audit 006](docs/audits/INTEGRATION_AUDIT_006.md) |
 | Brief 005 motion-first (M12-M18) | implemented; technical pass; fist control and downward comfort need real data | [Brief 005 report](docs/milestones/BRIEF_005_REPORT.md) |
 | Integration Audit 007 | technical PASS; not a full pass | [Audit 007](docs/audits/INTEGRATION_AUDIT_007.md) |
+| Brief 006 pose-independent motion (M19-M25) | implemented; technical pass; whole-hand swipes and accidental swipes need the Director | [Brief 006 report](docs/milestones/BRIEF_006_REPORT.md) |
+| Integration Audit 008 | technical PASS; not a full pass | [Audit 008](docs/audits/INTEGRATION_AUDIT_008.md) |
 
-## Recognition results (development data unless stated)
+## Recognition results (development data from one person; all four real recordings)
 
-| Gesture | Result | Source |
+| Category | 0.6.0b1 (any hand shape) | Notes |
 |---|---|---|
-| Finger up / down | 8/8 / 8/8 (also mirrored) | real recordings (flicks and hand swipes) |
-| Finger right / left | 4/4 / 2/4 | semi-synthetic (rotated real swipes) |
-| Fist up / down / right / left | 3/4, 4/4, 6/6, 5/6 | semi-synthetic (real palm motion, fingers re-posed) |
-| Open-palm swipes (experiment) | 0/12, 7 opposite | real sweeps - rejected, off |
-| Half-heart | 2 confirmed in Practice | real use (attempts unknown) |
-| Stop | 4 confirmed incl. 2 live toggles; arm's-length recordings 0/3 | real use / real |
-| False events | finger: 2 in the replay (1 in 190 s of negatives); finger or fist: 4 (the 2 extra while lowering thumbs-ups) | real |
+| Finger down / up | 18/18 / 8/8, 0 wrong direction | 0.5 on session 5: 5/10 with 7 wrong |
+| Fist up / down / left / right | 5/8, 3/8 (1 wrong), 5/8, 7/8 | 0 with pointing finger only |
+| Open hand left / right | 6/6 / 6/6 | 0 in 0.5 |
+| Held-out look (left hand, before the last iterations) | finger 5/5; whole hand 5/16 | the only independent result |
+| Ordinary activity (249 s) | 11 false events | 6 with pointing finger only |
+| 15 fps / 10 % frame loss (synthetic) | finger up 4/8 (3 wrong) / 6/8 (2 wrong) | missed flicks let their return through |
+| Half-heart, stop | unchanged from 0.5 | |
 
 ## Test results (2026-11-27)
 
 | Command | Result |
 |---|---|
 | `ruff format --check` / `ruff check` | clean |
-| `pytest` | 650 passed, 6 skipped - Brief 004 end 615 passed |
+| `pytest` | 686 passed, 0 failed, 0 expected failures, 6 skipped (webcam and live tests, run below) - Brief 005 end 650 |
+| Repeated full runs | 5 during development and 3 on the final code: all green |
 | `pytest tests/hardware --hardware` | 5 passed |
-| `pytest tests/live --live-youtube` | 3 of 3 runs passed (next 298-304 ms, previous 222-244 ms) |
-| Packaged build `--self-test` | PASS (0.5.0b1) |
+| `pytest tests/live --live-youtube` | 3 of 3 runs passed (next 278-623 ms, previous 234-242 ms) |
+| Packaged build `--self-test` | PASS (0.6.0b1) |
 | GitHub Actions | see the commit list; checked after the last push |
 
-## Performance (development machine, 1280x720, Gesture test mode, production services)
+## Performance (development machine, 1280x720)
 
-| Measure | Brief 004 | Brief 005 |
+| Measure | Brief 005 | Brief 006 |
 |---|---|---|
-| Capture / processing FPS | 30.0-30.1 | 30.1 / 30.1 (6 min) |
-| Capture-to-result latency | 13.3-15.8 ms | 14.0 ms mean, 23.4 ms p95 |
-| Recognition per frame (replay) | 0.156 ms | finger 0.144 ms, finger or fist 0.149 ms |
-| CPU / memory | 4.5-5.4 % / no growth | 4.3 % / 383 -> 365 MB |
-| UI stalls | 1-2 per session | none in 6 minutes |
+| Capture / processing FPS | 30.1 / 30.1 | 30.4 / 30.4 (6 min GUI session) |
+| Webcam frame rate available | - | 30 fps only (60 requested, 30 delivered) |
+| Capture-to-result latency | 14.0 ms (hand in view) | 9.6 ms, **no hand in view** (not comparable); pipeline benchmark: 9.7 ms hand-only, 11.0 ms with segmentation and face (p95 17.8) |
+| Recognition per frame (replay, 56,682 frames) | 0.144 ms (fewer recordings) | finger 0.201 ms, any hand shape 0.208 ms |
+| CPU / memory | 4.3 % / 383 -> 365 MB | 3.9 % / 381 -> 375 MB |
+| UI stalls | none in 6 min | 2 (startup 524 ms; 185 ms machine-wide pause) |
 
 ## Director validation
 
 Nothing in Briefs 002-004 has been verified by the Director yet (M1 was). Start with
-[BRIEF_005_VALIDATION.md](docs/milestones/BRIEF_005_VALIDATION.md) (about 20 minutes); the older
+[BRIEF_006_VALIDATION.md](docs/milestones/BRIEF_006_VALIDATION.md) (about 15 minutes); the older
 [checklist](docs/milestones/DIRECTOR_ACCEPTANCE_CHECKLIST.md) covers the remaining Brief 003
 features (OBS, co-op on two PCs, packaging on a second PC).
 
@@ -83,12 +103,22 @@ features (OBS, co-op on two PCs, packaging on a second PC).
 
 | Severity | Issue |
 |---|---|
-| High (verification) | Fist control unvalidated on real hands; all gesture numbers come from one person's development recordings |
-| Medium | Downward finger *curl* flicks wait for the finger to straighten (they move like the return of an upward flick); hand or wrist movement down is immediate |
-| Medium | Finger-or-fist style: closed hands moved after a thumbs-up can trigger fist swipes (2 recorded cases) |
-| Medium | Finger flicks need about 30 fps; stop pose unreliable at arm's length |
-| Medium | YouTube markup changes would make Shorts actions fail (reported as failed/unknown) |
+| High (verification) | All gesture numbers come from one person's recordings, all now used for development |
+| High | Whole-hand swipes need a brief pause before the movement; rhythmic swipes without a pause and the raise before a downward whole-hand swipe are not handled reliably |
+| Medium | Any hand shape roughly doubles accidental swipes in ordinary activity compared with pointing finger only |
+| Medium | Below ~20 fps or with frame loss a missed upward flick can produce a downward swipe |
+| Medium | Stop pose unreliable at arm's length; YouTube markup changes would make Shorts actions fail |
 | Low | Rare UI stalls inside Qt (instrumented); packaged build unsigned |
+
+## Commits for Engineering Brief 006
+
+```
+e4b8237 fix(gestures): ignore momentary duplicate detections of the moving hand
+bdaf899 feat(gestures): recognize swipes with any hand shape in one motion engine
+6ef5d6c feat(diagnostics): show the measured trajectory and report frame timing and duplicates
+```
+
+Followed by the documentation commit (benchmark 006, Audit 008, guides, version 0.6.0b1).
 
 ## Commits for Engineering Brief 005
 
@@ -130,8 +160,8 @@ Followed by the audit/status documentation commit.
 
 ## Recommended next steps
 
-1. Director: [BRIEF_005_VALIDATION.md](docs/milestones/BRIEF_005_VALIDATION.md) - compare finger
-   and fist swipes, especially downward; recalibrate (the 0.4 profile was reset).
-2. `scripts\record_gestures.py --session 5 --hand right` and `--hand left` (about 3 minutes
-   each): decides whether fist or finger-or-fist control can become the default.
+1. Director: [BRIEF_006_VALIDATION.md](docs/milestones/BRIEF_006_VALIDATION.md) - downward
+   swipes in different ways, accidental swipes with any hand shape vs pointing finger only.
+2. A new recording with each hand (`record_gestures.py --session 5`): the only possible
+   independent test data now.
 3. Signed-in like test by the Director.

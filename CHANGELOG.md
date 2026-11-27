@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0b1] - beta (not released; Director validation pending)
+
+Engineering Brief 006: pose-independent motion recognition. Evidence:
+`docs/benchmarks/GESTURE_BENCHMARK_006.md`.
+
+### Fixed
+
+- Fast swipes were cancelled when MediaPipe briefly detected the blurred hand twice; in the
+  Director's downward finger swipes the finger extensions then fired as swipes up.
+- A hand lost for a moment and re-found elsewhere could be read as a swipe.
+
+### Changed
+
+- Swipes work with any hand shape (default): a pointing hand is measured at the fingertip as
+  before, every other shape at the centre of the hand after a brief pause; the shape may change
+  during the movement. "Pointing finger only" remains available. 0.5 settings move to it once
+  with a notice; the open-palm experiment is removed from the settings.
+- Practice accepts the asked direction with any hand shape; Practice and Quick Calibration
+  offer "Pointing finger" or "Whole hand, any shape".
+
+### Added
+
+- The video shows the measured trajectory of the movement; Copy diagnostics reports frame
+  timing, frames with a control hand and ignored duplicate detections.
+- `scripts/benchmark_motion.py` (development / held-out rows, wrong-direction and duplicate
+  counts, synthetic degradations).
+
 ## [0.5.0b1] - beta (not released; Director validation pending)
 
 Engineering Brief 005: motion-first gesture recognition. Evidence:
