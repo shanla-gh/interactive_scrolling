@@ -159,10 +159,29 @@ class ControlHandPreference(enum.Enum):
 
 
 class SensitivityPreset(enum.Enum):
+    """Shown as Precise (LOW sensitivity: larger, deliberate movements), Balanced and Relaxed
+    (HIGH: smaller movements are enough). PERSONAL holds values from Quick Calibration and
+    CUSTOM values edited by hand; both keep their stored values."""
+
     LOW = "low"
     BALANCED = "balanced"
     HIGH = "high"
     CUSTOM = "custom"
+    PERSONAL = "personal"
+
+    @property
+    def keeps_values(self) -> bool:
+        return self in (SensitivityPreset.CUSTOM, SensitivityPreset.PERSONAL)
+
+    @property
+    def display(self) -> str:
+        return {
+            SensitivityPreset.LOW: "Precise - larger, deliberate movements",
+            SensitivityPreset.BALANCED: "Balanced (recommended)",
+            SensitivityPreset.HIGH: "Relaxed - smaller movements are enough",
+            SensitivityPreset.CUSTOM: "Custom",
+            SensitivityPreset.PERSONAL: "Personal (from Quick Calibration)",
+        }[self]
 
 
 # Thresholds scaled by a preset: lower sensitivity needs larger, faster, longer gestures.
@@ -192,6 +211,8 @@ _RANGES: dict[str, tuple[float, float]] = {
     "rearm_still_s": (0.0, 2.0),
     "rearm_max_speed_palms_s": (0.1, 3.0),
     "min_track_age_s": (0.0, 2.0),
+    "swipe_horizontal_distance_palms": (0.0, 3.0),
+    "stop_upright_deg": (20.0, 75.0),
 }
 
 GESTURE_ENABLE_FIELDS = (
@@ -222,7 +243,7 @@ class GestureSettings:
     direction_ratio: float = 1.8
     """The main axis must exceed the cross axis by this factor (1.8 = within ~29 degrees);
     movements between the axes are rejected rather than assigned to a direction."""
-    half_heart_hold_s: float = 0.6
+    half_heart_hold_s: float = 0.5
     stop_hold_s: float = 0.8
     static_max_speed_palms_s: float = 0.6
     cooldown_s: float = 0.5
@@ -239,6 +260,11 @@ class GestureSettings:
     that is already moving when it is acquired cannot trigger a swipe."""
     rearm_max_speed_palms_s: float = 1.0
     min_track_age_s: float = 0.3
+    swipe_horizontal_distance_palms: float = 0.0
+    """Distance for left/right swipes; 0 = the same as ``swipe_min_distance_palms``. Quick
+    Calibration may set the two axes separately (comfortable ranges differ by person)."""
+    stop_upright_deg: float = 40.0
+    """How far the fingers of the stop pose may tilt from straight up."""
     control_hand: ControlHandPreference = ControlHandPreference.AUTO
     enable_swipe_down: bool = True
     enable_swipe_up: bool = True
@@ -256,8 +282,8 @@ class GestureSettings:
     @classmethod
     def from_preset(cls, preset: SensitivityPreset, **overrides: object) -> GestureSettings:
         """Defaults scaled for ``preset``; other fields (hand, enabled gestures) via overrides."""
-        if preset is SensitivityPreset.CUSTOM:
-            raise ConfigError("CUSTOM is not a preset; edit individual values instead.")
+        if preset.keeps_values:
+            raise ConfigError(f"{preset.value} is not a preset; edit individual values instead.")
         base = cls()
         scale = _PRESET_SCALES[preset]
         values: dict[str, object] = {name: getattr(base, name) * scale for name in _SCALED_FIELDS}
@@ -428,3 +454,27 @@ class AppSettings:
     overlay: OverlaySettings = field(default_factory=OverlaySettings)
     gestures: GestureSettings = field(default_factory=GestureSettings)
     mirror_preview: bool = True
+
+
+@dataclass(frozen=True)
+class CalibrationProfile:
+    """Derived results of Quick Calibration (no images, no landmark sequences).
+
+    The swipe thresholds it produced live in :class:`GestureSettings` (preset PERSONAL); this
+    section keeps the personal half-heart template - the median shape measurements of the
+    user's own demonstrations - and when and with which hand the calibration was made.
+    ``None`` means "not calibrated" for that gesture."""
+
+    created: str = ""
+    hand: str = ""
+    heart_index_flexion: float | None = None
+    heart_index_reach: float | None = None
+    heart_hook: float | None = None
+    heart_thumb_down: float | None = None
+    heart_thumb_below: float | None = None
+    heart_gap: float | None = None
+    heart_upright: float | None = None
+
+    @property
+    def has_heart(self) -> bool:
+        return self.heart_hook is not None

@@ -223,3 +223,44 @@ def test_version_2_customised_vertical_mapping_is_kept(tmp_path: Path) -> None:
     assert settings.mapping[GestureType.INDEX_SWIPE_DOWN] is ActionType.LIKE_SHORT
     assert settings.mapping[GestureType.INDEX_SWIPE_UP] is ActionType.PREVIOUS_SHORT
     assert store.migrations == []
+
+
+def test_named_preset_follows_the_current_preset_values(tmp_path: Path) -> None:
+    """A stored named preset carries the values of the version that saved it; the thresholds
+    are re-derived from the preset so improved defaults apply (Brief 004: half-heart hold
+    0.6 -> 0.5 s). The hand and the enabled gestures are kept."""
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "gestures": {
+                    "preset": "balanced",
+                    "half_heart_hold_s": 0.6,
+                    "control_hand": "left",
+                    "enable_stop": False,
+                },
+                "pairing_token": "an-existing-pairing-token",
+            }
+        ),
+        encoding="utf-8",
+    )
+    g = SettingsStore(path).load().gestures
+    assert g.half_heart_hold_s == GestureSettings().half_heart_hold_s
+    assert g.control_hand is ControlHandPreference.LEFT
+    assert g.enable_stop is False
+
+
+def test_custom_preset_keeps_its_values(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "gestures": {"preset": "custom", "half_heart_hold_s": 0.7},
+                "pairing_token": "an-existing-pairing-token",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert SettingsStore(path).load().gestures.half_heart_hold_s == 0.7

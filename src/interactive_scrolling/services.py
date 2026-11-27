@@ -12,14 +12,17 @@ The UI subscribes to the same dispatcher/mode listeners for display.
 
 from __future__ import annotations
 
+import json
 import logging
+import platform
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
+from interactive_scrolling import __version__
 from interactive_scrolling.actions.dispatcher import ActionDispatcher
 from interactive_scrolling.actions.types import (
     ActionRecord,
@@ -27,8 +30,15 @@ from interactive_scrolling.actions.types import (
     ActionType,
     ControlMode,
 )
-from interactive_scrolling.config.settings import GestureSettings
+from interactive_scrolling.config.settings import (
+    GESTURE_ENABLE_FIELDS,
+    CalibrationProfile,
+    GestureSettings,
+    SensitivityPreset,
+)
+from interactive_scrolling.gestures.diagnostics import GestureDiagnostics, LandmarkRecorder
 from interactive_scrolling.gestures.engine import GestureEngine
+from interactive_scrolling.gestures.types import GestureFrame
 from interactive_scrolling.integrations.coop.session import (
     CoopGuest,
     CoopGuestController,
@@ -39,6 +49,7 @@ from interactive_scrolling.integrations.youtube.bridge import BridgeServer
 from interactive_scrolling.integrations.youtube.controller import YouTubeShortsController
 from interactive_scrolling.storage.analytics import AnalyticsStore, EventKind
 from interactive_scrolling.storage.settings_store import SettingsStore, UserSettings
+from interactive_scrolling.vision.landmarks import TrackingResult
 from interactive_scrolling.wellbeing.eyes import Baseline, EyeAnalytics
 from interactive_scrolling.wellbeing.monitor import Notice, WellbeingMonitor
 from interactive_scrolling.wellbeing.report import (
@@ -87,6 +98,82 @@ class ControlServices:
         self._eye_lock = threading.Lock()
         self._eye_flushed = self.wall_clock()
         self.eye_report = None
+        self.diagnostics = GestureDiagnostics()
+        self.recorder = LandmarkRecorder()
+        self.dispatcher.add_record_listener(self._diagnose_record)
+
+    # ------------------------------------------------------------------ diagnostics
+
+    def gesture_tap(self, tracking: TrackingResult, frame: GestureFrame) -> None:
+        """Every processed frame (processing thread): diagnostics and the opt-in recorder."""
+        self.diagnostics.observe(tracking, frame)
+        self.recorder.observe(tracking)
+
+    def _diagnose_record(self, record: ActionRecord) -> None:
+        if record.status.final:
+            self.diagnostics.observe_action(
+                record.event.gesture.value,
+                record.action.value,
+                record.status.value,
+                record.reason,
+                record.action_latency_ms,
+            )
+
+    def diagnostics_report(self, performance: dict | None = None) -> dict:
+        """Everything needed to analyse a recognition or browser problem, without personal
+        data: no pairing code, page addresses, titles, video ids or images."""
+        settings = self.user_settings
+        gestures = {
+            k: (v.value if hasattr(v, "value") else v) for k, v in asdict(settings.gestures).items()
+        }
+        browser: dict = {"connected": False}
+        if self.controller is not None:
+            status = self.controller.status()
+            browser = {
+                "bridge_listening": status.listening,
+                "bridge_error": status.bridge_error,
+                "connections": status.connections,
+                "browsers": list(status.browsers),
+                "shorts_ready": status.ready,
+                "reason": status.reason,
+                "signed_in": status.signed_in,
+                "browser_focused": status.browser_focused,
+            }
+        if self.bridge is not None:
+            browser["extensions"] = [
+                {"browser": c.browser, "version": c.extension_version, "protocol": c.protocol}
+                for c in self.bridge.clients()
+            ]
+        return {
+            "app_version": __version__,
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "system": f"{platform.system()} {platform.release()}, "
+            f"Python {platform.python_version()}",
+            "control_mode": self.dispatcher.mode.value,
+            "gesture_settings": gestures,
+            "mapping": {g.value: a.value for g, a in settings.mapping.items()},
+            "browser": browser,
+            "performance": performance or {},
+            "recognition": self.diagnostics.snapshot(),
+        }
+
+    def export_diagnostics(self, folder: Path, performance: dict | None = None) -> Path:
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"diagnostics-{datetime.now():%Y%m%d-%H%M%S}.json"
+        path.write_text(
+            json.dumps(self.diagnostics_report(performance), indent=2), encoding="utf-8"
+        )
+        return path
+
+    def save_recording(self, folder: Path) -> Path | None:
+        """Stop the landmark recording and save it (landmark numbers only, no images)."""
+        content = self.recorder.stop()
+        if content is None or not content["frames"]:
+            return None
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"gestures_{datetime.now():%Y%m%d_%H%M%S}.json"
+        path.write_text(json.dumps(content), encoding="utf-8")
+        return path
 
     # ------------------------------------------------------------------ eye analytics
 
@@ -263,6 +350,22 @@ class ControlServices:
         self.engine.request_settings(settings)
         self._save(replace(self.user_settings, gestures=settings))
 
+    def apply_calibration(self, settings: GestureSettings, profile: CalibrationProfile) -> None:
+        """Use and persist a Quick Calibration result (thresholds and half-heart template)."""
+        self.engine.set_profile(profile)
+        self.engine.request_settings(settings)
+        self._save(replace(self.user_settings, gestures=settings, calibration=profile))
+
+    def reset_calibration(self) -> None:
+        """Back to the standard (Balanced) thresholds and shapes; mapping and hand are kept."""
+        current = self.user_settings.gestures
+        settings = GestureSettings.from_preset(
+            SensitivityPreset.BALANCED,
+            control_hand=current.control_hand,
+            **{name: getattr(current, name) for name in GESTURE_ENABLE_FIELDS},
+        )
+        self.apply_calibration(settings, CalibrationProfile())
+
     def apply_mapping(self, mapping) -> None:
         self.dispatcher.set_mapping(mapping)
         self._save(replace(self.user_settings, mapping=dict(mapping)))
@@ -365,7 +468,7 @@ def build_services(data_dir: Path | None = None, start_bridge: bool = True) -> C
     if start_bridge:
         bridge.start()
     services = ControlServices(
-        engine=GestureEngine(user.gestures),
+        engine=GestureEngine(user.gestures, profile=user.calibration),
         dispatcher=ActionDispatcher(controller, user.mapping),
         user_settings=user,
         store=store,
@@ -381,7 +484,7 @@ def offline_services(settings: GestureSettings | None = None) -> ControlServices
     """Services without persistence, analytics or browser bridge (tests, tracking-only use)."""
     user = UserSettings(gestures=settings or GestureSettings())
     return ControlServices(
-        engine=GestureEngine(user.gestures),
+        engine=GestureEngine(user.gestures, profile=user.calibration),
         dispatcher=ActionDispatcher(None, user.mapping),
         user_settings=user,
     )

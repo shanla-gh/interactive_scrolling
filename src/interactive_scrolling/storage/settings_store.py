@@ -35,7 +35,9 @@ from interactive_scrolling.actions.types import (
     validate_mapping,
 )
 from interactive_scrolling.config.settings import (
+    GESTURE_ENABLE_FIELDS,
     AppearanceSettings,
+    CalibrationProfile,
     ConfigError,
     ControlHandPreference,
     CreatorSettings,
@@ -87,6 +89,7 @@ class UserSettings:
     creator: CreatorSettings = field(default_factory=CreatorSettings)
     wellbeing: WellbeingSettings = field(default_factory=WellbeingSettings)
     effects: EffectsSettings = field(default_factory=EffectsSettings)
+    calibration: CalibrationProfile = field(default_factory=CalibrationProfile)
 
 
 SECTIONS: dict[str, type] = {
@@ -94,6 +97,7 @@ SECTIONS: dict[str, type] = {
     "creator": CreatorSettings,
     "wellbeing": WellbeingSettings,
     "effects": EffectsSettings,
+    "calibration": CalibrationProfile,
 }
 """Simple settings sections stored as JSON objects (fields of bool, int, float, str, enum or
 optional int), validated field by field."""
@@ -208,6 +212,24 @@ def _gesture_settings_from_json(data: Any, warnings: list[str]) -> GestureSettin
             settings = replace(settings, **{f.name: value})
         except (ValueError, TypeError, ConfigError) as exc:
             warnings.append(f"invalid value for {f.name} ({raw!r}): {exc}; default used")
+    if "preset" not in data:
+        # No preset stored: values that differ from the defaults are the user's own.
+        defaults = GestureSettings()
+        if any(
+            getattr(settings, f.name) != getattr(defaults, f.name)
+            for f in fields(GestureSettings)
+            if f.name not in ("preset", "control_hand", *GESTURE_ENABLE_FIELDS)
+        ):
+            settings = replace(settings, preset=SensitivityPreset.CUSTOM)
+    if not settings.preset.keeps_values:
+        # Under a named preset every threshold comes from the preset (editing one switches to
+        # Custom), so improved preset values of a new version apply; the hand and the enabled
+        # gestures are the user's own choices and are kept.
+        settings = GestureSettings.from_preset(
+            settings.preset,
+            control_hand=settings.control_hand,
+            **{name: getattr(settings, name) for name in GESTURE_ENABLE_FIELDS},
+        )
     return settings
 
 

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from interactive_scrolling.actions.types import ActionRecord, ActionStatus, ActionType
+from interactive_scrolling.gestures.explain import explain_rejection
 from interactive_scrolling.gestures.types import ControlStatus, GestureFrame
 from interactive_scrolling.ui.panels import NO_DATA, Card
 from interactive_scrolling.visualization import palette
@@ -33,6 +34,17 @@ STATUS_COLORS = {
 }
 
 
+def outcome_banner(record: ActionRecord) -> tuple[str, str]:
+    """(text, colour) of the overlay banner for a finished action."""
+    action = record.action.label
+    if record.status in (ActionStatus.SUCCEEDED, ActionStatus.NO_CHANGE):
+        detail = " (already liked)" if record.status is ActionStatus.NO_CHANGE else ""
+        return f"\u2713 {action}{detail}", palette.ACCENT_GREEN
+    reason = f": {record.reason}" if record.reason else ""
+    color = palette.ACCENT_AMBER if record.status is ActionStatus.REJECTED else palette.ACCENT_RED
+    return f"\u2717 {action}{reason}", color
+
+
 def describe(record: ActionRecord) -> str:
     text = record.status.value
     if record.reason:
@@ -44,6 +56,8 @@ def describe(record: ActionRecord) -> str:
 
 class GesturePanel(Card):
     settings_requested = Signal()
+    practice_requested = Signal()
+    diagnostics_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Gesture recognition", parent)
@@ -58,12 +72,24 @@ class GesturePanel(Card):
         self.add_widget(self.progress)
         self.last = self.add_row("Last confirmed", accent=True)
         self.action = self.add_row("Action")
-        self.rejection = self.add_row("Last rejection")
-        for label in (self.rejection, self.action, self.last):
+        self.rejection = self.add_row("Why not recognized")
+        self.hint = self.add_row("Hint")
+        for label in (self.rejection, self.action, self.last, self.hint):
             label.setWordWrap(True)
+        practice = QPushButton("Practice and calibrate...")
+        practice.setToolTip("Learn the gestures with live feedback; no browser actions.")
+        practice.clicked.connect(self.practice_requested)
+        self.add_widget(practice)
         button = QPushButton("Gesture settings...")
         button.clicked.connect(self.settings_requested)
         self.add_widget(button)
+        diagnostics = QPushButton("Copy diagnostics")
+        diagnostics.setToolTip(
+            "Copy recent recognition decisions and browser results (no images, no page "
+            "addresses) to the clipboard and save them as a file."
+        )
+        diagnostics.clicked.connect(self.diagnostics_requested)
+        self.add_widget(diagnostics)
         self.show_frame(None, enabled=False)
 
     def show_frame(self, frame: GestureFrame | None, enabled: bool) -> None:
@@ -101,8 +127,9 @@ class GesturePanel(Card):
         else:
             self.candidate.setText(NO_DATA)
             self.progress.setValue(0)
-        if frame.rejection is not None:
-            self.rejection.setText(f"{frame.rejection.gesture.label}: {frame.rejection.reason}")
+        if frame.rejection is not None and frame.rejection.code not in ("tracking_lost",):
+            self.rejection.setText(explain_rejection(frame.rejection))
+        self.hint.setText(frame.hint or NO_DATA)
 
     def show_record(self, record: ActionRecord) -> None:
         self.last.setText(record.event.gesture.label)

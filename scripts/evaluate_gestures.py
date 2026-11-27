@@ -189,7 +189,7 @@ def rotate_vertical_segments(frames: list[dict]) -> list[dict]:
     return out
 
 
-_SWAP = {"left": "right", "right": "left"}
+_SWAP = {"left": "Right", "right": "Left"}
 
 
 def tracking_of(frame: dict, mirror: bool) -> TrackingResult:
@@ -200,7 +200,7 @@ def tracking_of(frame: dict, mirror: bool) -> TrackingResult:
         if mirror:
             landmarks = landmarks.copy()
             landmarks[:, 0] = 1.0 - landmarks[:, 0]
-            label = _SWAP.get(label, label)
+            label = _SWAP.get(str(label).lower(), label)
         hands.append(
             HandObservation(
                 landmarks=landmarks,

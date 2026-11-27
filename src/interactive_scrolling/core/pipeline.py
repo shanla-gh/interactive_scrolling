@@ -153,6 +153,7 @@ class VisionPipeline:
         self._on_gesture_event = on_gesture_event
         self._progress = progress or (lambda name: None)
         self._frame_taps: list[Callable[[np.ndarray, int, int], None]] = []
+        self._gesture_taps: list[Callable[[TrackingResult, GestureFrame], None]] = []
         """Called with "capture" / "processing" after every frame (stall attribution)."""
         self._gestures_enabled = False
         self._gesture_reset_requested = False
@@ -452,6 +453,12 @@ class VisionPipeline:
 
     # ------------------------------------------------------------------ gestures
 
+    def add_gesture_tap(self, tap: Callable[[TrackingResult, GestureFrame], None]) -> None:
+        """Called on the processing thread with every frame's tracking and gesture result.
+        Taps must be fast (they run in the frame loop) and must not keep the landmarks
+        array beyond the call unless they copy it."""
+        self._gesture_taps.append(tap)
+
     def add_frame_tap(self, tap: Callable[[np.ndarray, int, int], None]) -> None:
         """Register ``tap(image_rgb, timestamp_ns, session)``, called for every processed frame
         on the processing thread. Taps must return immediately and must not modify the image.
@@ -492,6 +499,8 @@ class VisionPipeline:
             return None, None
         elapsed = (self._clock() - t0) / NS_PER_MS
         self._gesture_stats.add(elapsed)
+        for tap in self._gesture_taps:
+            self._safe_call(tap, tracking, frame)
         if self._on_gesture_event is not None:
             for event in frame.events:
                 self._safe_call(self._on_gesture_event, event)

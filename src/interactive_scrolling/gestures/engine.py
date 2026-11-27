@@ -29,9 +29,13 @@ import math
 import threading
 from collections import Counter, deque
 
-from interactive_scrolling.config.settings import ControlHandPreference, GestureSettings
+from interactive_scrolling.config.settings import (
+    CalibrationProfile,
+    ControlHandPreference,
+    GestureSettings,
+)
 from interactive_scrolling.core.timing import NS_PER_S
-from interactive_scrolling.gestures.pose import analyze_pose
+from interactive_scrolling.gestures.pose import PoseLabel, analyze_pose, matches_personal_heart
 from interactive_scrolling.gestures.recognizers import (
     DirectionalSwipeRecognizer,
     HandSample,
@@ -70,10 +74,14 @@ EDGE_MARGIN_FRACTION = 0.04
 
 class GestureEngine:
     def __init__(
-        self, settings: GestureSettings | None = None, options: RecognizerOptions | None = None
+        self,
+        settings: GestureSettings | None = None,
+        options: RecognizerOptions | None = None,
+        profile: CalibrationProfile | None = None,
     ) -> None:
         self._settings = settings or GestureSettings()
         self.options = options or RecognizerOptions()
+        self.profile: CalibrationProfile | None = profile
         self._pending_settings: GestureSettings | None = None
         self._lock = threading.Lock()
         self._build()
@@ -97,7 +105,7 @@ class GestureEngine:
         self.swipes = DirectionalSwipeRecognizer(s, pose_ok=pointing, pose_fraction=0.6, options=o)
         self.heart = StaticPoseRecognizer(
             GestureType.HALF_HEART,
-            half_heart,
+            self._half_heart,
             lambda: self._settings.half_heart_hold_s,
             s,
             options=o,
@@ -105,13 +113,33 @@ class GestureEngine:
         )
         self.stop = StaticPoseRecognizer(
             GestureType.STOP_GESTURE,
-            stop_pose,
+            self._stop_pose,
             lambda: self._settings.stop_hold_s,
             s,
             options=o,
             describe=unmet_stop_conditions,
         )
         self._apply_enabled()
+
+    def _stop_pose(self, pose) -> bool:  # type: ignore[no-untyped-def]
+        tilt = self._settings.stop_upright_deg
+        if tilt == 40.0:
+            return stop_pose(pose)
+        return pose.label is PoseLabel.OPEN_PALM and pose.fingers_up_alignment >= math.cos(
+            math.radians(tilt)
+        )
+
+    def _half_heart(self, pose) -> bool:  # type: ignore[no-untyped-def]
+        if half_heart(pose):
+            return True
+        template = self.profile
+        return (
+            template is not None and template.has_heart and matches_personal_heart(pose, template)
+        )
+
+    def set_profile(self, profile: CalibrationProfile | None) -> None:
+        """Personal calibration results (thread-safe enough: one reference assignment)."""
+        self.profile = profile
 
     def _apply_enabled(self) -> None:
         s = self._settings

@@ -326,7 +326,7 @@ def heart(start: float, end: float, other=FIST) -> Hand:
 def test_held_half_heart_triggers_exactly_once() -> None:
     events, _ = run([heart(0.5, 4.0)], 4.5)
     assert kinds(events) == ["HALF_HEART"]
-    assert events[0].duration_s >= 0.6
+    assert events[0].duration_s >= GestureSettings().half_heart_hold_s
 
 
 @pytest.mark.parametrize("handedness", [Handedness.RIGHT, Handedness.LEFT])

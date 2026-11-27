@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFrame,
@@ -51,7 +54,7 @@ from interactive_scrolling.ui.effects_panel import (
     EffectsDialog,
     VisualBehaviorPanel,
 )
-from interactive_scrolling.ui.gesture_panels import GestureHistory, GesturePanel
+from interactive_scrolling.ui.gesture_panels import GestureHistory, GesturePanel, outcome_banner
 from interactive_scrolling.ui.hotkey import GlobalHotkey
 from interactive_scrolling.ui.panels import MotionPanel, OverlayPanel, TrackingPanel
 from interactive_scrolling.ui.report_panels import (
@@ -147,6 +150,8 @@ class MainWindow(QMainWindow):
             on_gesture_event=self._on_gesture_event,
             progress=self.stall_monitor.worker_progress,
         )
+        # Recognition diagnostics and the opt-in landmark recorder see every processed frame.
+        self.pipeline.add_gesture_tap(self.services.gesture_tap)
 
         self.video = VideoView(settings.overlay)
         self.video.section = self.stall_monitor.section
@@ -238,6 +243,8 @@ class MainWindow(QMainWindow):
         self.control_bar.mode_requested.connect(self.set_control_mode)
         self.control_bar.disable_requested.connect(self.emergency_disable)
         self.gesture_panel.settings_requested.connect(self.open_gesture_settings)
+        self.gesture_panel.diagnostics_requested.connect(self.copy_diagnostics)
+        self.gesture_panel.practice_requested.connect(self.open_practice)
         self.today_panel.enabled_changed.connect(self.services.set_analytics_enabled)
         self.today_panel.clear_requested.connect(self._clear_statistics)
         self.today_panel.pause_toggled.connect(self.services.pause_scrolling)
@@ -626,6 +633,10 @@ class MainWindow(QMainWindow):
         self.creator.show_record(record)
         if first:
             self.video.show_gesture(record.event.gesture.label)
+        if record.status.final and record.status is not ActionStatus.NOT_EXECUTED:
+            # The final outcome replaces the gesture banner: immediate feedback first, then
+            # the verified result (YouTube can take a second to load the next Short).
+            self.video.show_gesture(*outcome_banner(record))
         if record.status.final or record.status is ActionStatus.DISPATCHED:
             self.control_bar.set_last(
                 f"{record.event.gesture.label} \u2192 {record.action.label}: {record.status.value}"
@@ -861,6 +872,69 @@ class MainWindow(QMainWindow):
             self.creator.apply_settings(creator, reposition=True)
             self.services.update_settings(appearance=appearance, creator=creator)
             log.info("Appearance saved.")
+
+    def _data_folder(self) -> Path:
+        store = self.services.store
+        if store is not None:
+            return store.path.parent
+        from interactive_scrolling.storage.paths import data_dir
+
+        return data_dir()
+
+    def _performance_summary(self) -> dict:
+        summary: dict = {}
+        mean = self.pipeline.gesture_ms_mean()
+        if mean is not None:
+            summary["gesture_recognition_ms_mean"] = round(mean, 3)
+        metrics = self.pipeline.metrics()
+        for name in (
+            "capture_fps",
+            "processing_fps",
+            "inference_ms",
+            "latency_ms",
+            "frames_dropped",
+        ):
+            value = getattr(metrics, name, None)
+            if isinstance(value, int | float):
+                summary[name] = round(float(value), 2)
+        summary["ui_stalls"] = getattr(self.stall_monitor, "stall_count", None)
+        return summary
+
+    def copy_diagnostics(self) -> None:
+        """Copy the diagnostics report to the clipboard and save it next to the settings."""
+        report = self.services.diagnostics_report(self._performance_summary())
+        text = json.dumps(report, indent=2)
+        QApplication.clipboard().setText(text)
+        try:
+            path = self.services.export_diagnostics(
+                self._data_folder() / "diagnostics", self._performance_summary()
+            )
+            message = f"Diagnostics copied to the clipboard and saved as {path}"
+        except OSError as exc:
+            message = f"Diagnostics copied to the clipboard (saving failed: {exc})"
+        log.info(message)
+        self.control_bar.set_last(message)
+        self.last_diagnostics_text = text
+
+    def open_practice(self) -> None:
+        from interactive_scrolling.ui.practice_dialog import PracticeDialog
+
+        dialog = PracticeDialog(self.services, self._data_folder(), self)
+        self.practice_dialog = dialog
+        dialog.finished.connect(lambda _: setattr(self, "practice_dialog", None))
+        dialog.show()
+
+    def show_startup_notices(self) -> None:
+        """One-time notices from settings migrations (e.g. the new scroll direction)."""
+        store = self.services.store
+        if store is None or not store.migrations:
+            return
+        notices = [m for m in store.migrations if m.startswith("Scroll direction")]
+        for notice in notices:
+            self.video.show_gesture("SCROLL DIRECTION UPDATED", palette.ACCENT_AMBER)
+            self.control_bar.set_last(notice)
+            self.tray.notify("Interactive Scrolling", notice)
+        store.migrations = [m for m in store.migrations if m not in notices]
 
     def open_gesture_settings(self) -> None:
         dialog = GestureSettingsDialog(

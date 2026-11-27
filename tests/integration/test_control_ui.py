@@ -166,7 +166,7 @@ def test_settings_dialog_changes_recognition_and_persists(qtbot, tmp_path) -> No
     qtbot.addWidget(dialog)
     dialog.preset.setCurrentIndex(dialog.preset.findData(SensitivityPreset.LOW))
     dialog.enables["enable_stop"].setChecked(False)
-    dialog.mapping_boxes[next(iter(dialog.mapping_boxes))].setCurrentIndex(0)  # swipe down -> none
+    dialog.mapping_boxes[next(iter(dialog.mapping_boxes))].setCurrentIndex(0)  # first row -> none
     assert dialog.result_settings().preset is SensitivityPreset.LOW
     dialog.accept()
     assert dialog.result() == QDialog.DialogCode.Accepted

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 from interactive_scrolling.config.settings import AppearanceSettings, OverlaySettings
 from interactive_scrolling.core.pipeline import ProcessedFrame
 from interactive_scrolling.core.timing import RateMeter, now_ns
+from interactive_scrolling.gestures.explain import state_label
 from interactive_scrolling.ui.theme import mono_font
 from interactive_scrolling.visualization import palette
 from interactive_scrolling.visualization.geometry import ViewTransform
@@ -76,6 +77,9 @@ class VideoView(QWidget):
         self.update()
 
     BANNER_S = 1.3
+
+    show_state: bool = True
+    """Show the recognizer's live state and positioning hints (Developer Mode)."""
 
     def show_gesture(self, text: str, color: str = palette.ACCENT_GREEN) -> None:
         """Briefly show a confirmed gesture at the top of the image (never over the hand)."""
@@ -180,6 +184,23 @@ class VideoView(QWidget):
         painter.save()
         rect = QRectF(t.x, t.y, t.width, t.height)
         gestures = frame.gestures
+        if self.show_state and gestures is not None:
+            painter.setFont(self._hud_font)
+            state = state_label(gestures)
+            if state:
+                painter.setPen(QColor(palette.ACCENT_CYAN))
+                painter.drawText(
+                    QRectF(rect.left() + 16, rect.bottom() - 54, rect.width() / 2, 18),
+                    Qt.AlignmentFlag.AlignLeft,
+                    state,
+                )
+            if gestures.hint:
+                painter.setPen(QColor(palette.ACCENT_AMBER))
+                painter.drawText(
+                    QRectF(rect.left(), rect.top() + 64, rect.width(), 18),
+                    Qt.AlignmentFlag.AlignCenter,
+                    gestures.hint,
+                )
         if gestures is not None and gestures.candidates:
             best = max(gestures.candidates, key=lambda c: c.progress)
             width = min(260.0, rect.width() * 0.4)

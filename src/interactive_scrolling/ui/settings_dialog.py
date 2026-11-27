@@ -37,7 +37,7 @@ from interactive_scrolling.gestures.types import GestureType
 TUNABLES = (
     (
         "swipe_min_distance_palms",
-        "Swipe distance",
+        "Swipe distance (up/down)",
         "palm lengths",
         0.3,
         3.0,
@@ -53,6 +53,15 @@ TUNABLES = (
         10.0,
         0.1,
         "Minimum peak speed of the fingertip during a swipe.",
+    ),
+    (
+        "swipe_horizontal_distance_palms",
+        "Swipe distance (left/right)",
+        "palm lengths",
+        0.0,
+        3.0,
+        0.05,
+        "Distance for left/right swipes; 0 means the same as up/down.",
     ),
     (
         "half_heart_hold_s",
@@ -92,17 +101,19 @@ TUNABLES = (
         "the opposite swipe).",
     ),
 )
+# Physical movement first, content second ("Move finger up -> Next Short"), so a finger
+# movement and the direction the feed moves can never be confused.
 ENABLES = (
-    ("enable_swipe_down", "Swipe down"),
-    ("enable_swipe_up", "Swipe up"),
-    ("enable_swipe_right", "Swipe right"),
-    ("enable_swipe_left", "Swipe left"),
+    ("enable_swipe_up", "Move finger up"),
+    ("enable_swipe_down", "Move finger down"),
+    ("enable_swipe_right", "Move finger to your right"),
+    ("enable_swipe_left", "Move finger to your left"),
     ("enable_half_heart", "Half-heart"),
-    ("enable_stop", "Stop pose"),
+    ("enable_stop", "Open palm (stop)"),
 )
 CONFIGURABLE_GESTURES_ORDER = (
-    GestureType.INDEX_SWIPE_DOWN,
     GestureType.INDEX_SWIPE_UP,
+    GestureType.INDEX_SWIPE_DOWN,
     GestureType.INDEX_SWIPE_RIGHT,
     GestureType.INDEX_SWIPE_LEFT,
     GestureType.HALF_HEART,
@@ -119,9 +130,10 @@ ACTION_ORDER = (
 )
 assert set(ACTION_ORDER) == set(AVAILABLE_ACTIONS)
 PRESETS = (
-    SensitivityPreset.LOW,
-    SensitivityPreset.BALANCED,
     SensitivityPreset.HIGH,
+    SensitivityPreset.BALANCED,
+    SensitivityPreset.LOW,
+    SensitivityPreset.PERSONAL,
     SensitivityPreset.CUSTOM,
 )
 
@@ -142,7 +154,7 @@ class GestureSettingsDialog(QDialog):
         top = QFormLayout()
         self.preset = QComboBox()
         for preset in PRESETS:
-            self.preset.addItem(preset.value.capitalize(), preset)
+            self.preset.addItem(preset.display, preset)
         self.preset.currentIndexChanged.connect(self._preset_changed)
         top.addRow("Sensitivity", self.preset)
         self.hand = QComboBox()
@@ -237,7 +249,7 @@ class GestureSettingsDialog(QDialog):
         if self._loading:
             return
         preset = self.preset.currentData()
-        if preset is SensitivityPreset.CUSTOM:
+        if preset.keeps_values:
             return
         current = self.result_settings(validate=False)
         base = GestureSettings.from_preset(

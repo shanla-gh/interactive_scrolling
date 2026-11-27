@@ -571,6 +571,7 @@ class DirectionalSwipeRecognizer:
         if d_axis > stroke.turn[0]:
             stroke.turn = (d_axis, sample.fingertip, ts)
         elapsed = _seconds(ts - stroke.start_ns)
+        distance = swipe_distance(s, gesture)
 
         def reject(
             code: str,
@@ -588,7 +589,7 @@ class DirectionalSwipeRecognizer:
                 )
             )
 
-        if d_axis >= s.swipe_min_distance_palms and not stroke.observed:
+        if d_axis >= distance and not stroke.observed:
             if d_cross * s.direction_ratio > d_axis:
                 angle = math.degrees(math.atan2(d_cross, d_axis))
                 limit = math.degrees(math.atan2(1.0, s.direction_ratio))
@@ -680,7 +681,7 @@ class DirectionalSwipeRecognizer:
                     RejectCode.TOO_SHORT,
                     "direction reversed",
                     max(0.0, stroke.turn[0]),
-                    s.swipe_min_distance_palms,
+                    distance,
                     "palms",
                 ).rejection
             self._stroke = None
@@ -705,7 +706,7 @@ class DirectionalSwipeRecognizer:
                     RejectCode.TOO_SHORT,
                     "movement too short",
                     max(0.0, d_axis),
-                    s.swipe_min_distance_palms,
+                    distance,
                     "palms",
                 )
         else:
@@ -713,7 +714,7 @@ class DirectionalSwipeRecognizer:
         if stroke.is_return or stroke.blocked:
             # A return movement or a blocked stroke is never shown as an upcoming gesture.
             return Step()
-        progress = max(0.0, min(1.0, d_axis / s.swipe_min_distance_palms))
+        progress = max(0.0, min(1.0, d_axis / distance))
         return Step(candidate=GestureCandidate(gesture, progress, elapsed))
 
     def _resolve_flick(self, sample: HandSample, pose_now: bool) -> Step | None:
@@ -831,6 +832,14 @@ class DirectionalSwipeRecognizer:
         if stroke.is_return or stroke.blocked:
             return Step()
         return Step(candidate=GestureCandidate(gesture, 0.0, 0.0))
+
+
+def swipe_distance(settings: GestureSettings, gesture: GestureType) -> float:
+    """Required fingertip travel for ``gesture`` (left/right may have their own value)."""
+    horizontal = gesture in (GestureType.INDEX_SWIPE_LEFT, GestureType.INDEX_SWIPE_RIGHT)
+    if horizontal and settings.swipe_horizontal_distance_palms > 0:
+        return settings.swipe_horizontal_distance_palms
+    return settings.swipe_min_distance_palms
 
 
 def _round(value: float | None) -> float | None:

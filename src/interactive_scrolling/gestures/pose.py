@@ -87,6 +87,11 @@ HEART_MIN_THUMB_DOWN = math.cos(math.radians(70))
 HEART_MIN_THUMB_BELOW = 0.25
 HEART_GAP = (0.3, 2.2)
 HEART_MIN_UPRIGHT = math.cos(math.radians(65))
+HEART_RULE = "tolerant"
+"""``"strict"`` (version 0.3): middle, ring and little finger must not be extended.
+``"tolerant"``: they may curve with the index; only a nearly straight one disqualifies."""
+HEART_STRAIGHT_FINGER = 35.0
+"""``"tolerant"``: a finger with less flexion than this (degrees) counts as straight."""
 # Hybrid finger states (image space).
 STRAIGHT_2D_MIN = 0.9
 REACH_2D_MIN = 0.55
@@ -164,10 +169,21 @@ class HeartGeometry:
 
     def matches(self, pose: HandPose) -> bool:
         low, high = HEART_INDEX_FLEXION
+        if HEART_RULE == "tolerant":
+            # The other fingers may curve with the index (the heart's top made with all four
+            # fingers); a straight finger pointing up still disqualifies the pose.
+            others_ok = not any(
+                pose.states[f] is FingerState.EXTENDED and pose.flexion[f] < HEART_STRAIGHT_FINGER
+                for f in ("middle", "ring", "pinky")
+            )
+        else:
+            others_ok = not any(
+                pose.states[f] is FingerState.EXTENDED for f in ("middle", "ring", "pinky")
+            )
         return (
             low <= pose.flexion["index"] <= high
             and pose.states["thumb"] is not FingerState.CURLED
-            and not any(pose.states[f] is FingerState.EXTENDED for f in ("middle", "ring", "pinky"))
+            and others_ok
             and pose.fingers_up_alignment >= HEART_MIN_UPRIGHT
             and self.index_reach >= HEART_MIN_INDEX_REACH
             and self.hook >= HEART_MIN_HOOK
@@ -370,3 +386,66 @@ def stop_checklist(pose: HandPose) -> list[tuple[str, bool]]:
         ),
         ("fingers pointing up", pose.fingers_up_alignment >= FINGERS_UP_MIN_ALIGNMENT),
     ]
+
+
+# Personal half-heart template (Quick Calibration): the user's own shape, measured, with a
+# tolerance around it. A pose must still be a heart in its essentials - a gap between the
+# tips (not a pinch), the thumb tip below the index tip, the index not straight - so a
+# template can widen the definition only around the user's real gesture.
+PERSONAL_HEART_TOLERANCE = {
+    "index_flexion": 45.0,
+    "index_reach": 0.25,
+    "hook": 0.15,
+    "thumb_down": 0.35,
+    "thumb_below": 0.3,
+    "gap": 0.4,
+    "upright": 0.35,
+}
+PERSONAL_HEART_MIN_GAP = 0.25
+PERSONAL_HEART_MIN_THUMB_BELOW = 0.1
+
+
+def heart_features(pose: HandPose) -> dict[str, float] | None:
+    g = pose.heart
+    if g is None:
+        return None
+    return {
+        "index_flexion": pose.flexion["index"],
+        "index_reach": g.index_reach,
+        "hook": g.hook,
+        "thumb_down": g.thumb_down_alignment,
+        "thumb_below": g.thumb_below_index,
+        "gap": g.gap,
+        "upright": pose.fingers_up_alignment,
+    }
+
+
+def matches_personal_heart(pose: HandPose, profile) -> bool:  # type: ignore[no-untyped-def]
+    """``profile``: a ``config.settings.CalibrationProfile`` with a heart template."""
+    features = heart_features(pose)
+    if features is None or pose.label in (
+        PoseLabel.POINTING,
+        PoseLabel.OPEN_PALM,
+        PoseLabel.THUMBS_UP,
+    ):
+        return False
+    if pose.states["thumb"] is FingerState.CURLED or pose.flexion["index"] < FINGER_EXTENDED_MAX:
+        return False
+    if features["gap"] < PERSONAL_HEART_MIN_GAP:
+        return False
+    if features["thumb_below"] < PERSONAL_HEART_MIN_THUMB_BELOW:
+        return False
+    template = {
+        "index_flexion": profile.heart_index_flexion,
+        "index_reach": profile.heart_index_reach,
+        "hook": profile.heart_hook,
+        "thumb_down": profile.heart_thumb_down,
+        "thumb_below": profile.heart_thumb_below,
+        "gap": profile.heart_gap,
+        "upright": profile.heart_upright,
+    }
+    for name, tolerance in PERSONAL_HEART_TOLERANCE.items():
+        reference = template[name]
+        if reference is None or abs(features[name] - reference) > tolerance:
+            return False
+    return True
