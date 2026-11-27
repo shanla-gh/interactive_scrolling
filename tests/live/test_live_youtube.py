@@ -80,7 +80,16 @@ def test_real_youtube_shorts_end_to_end() -> None:
         assert controller.status().signed_in is False
 
         def run(action: ActionType):
-            assert wait_until(lambda: controller.check(action).ready, timeout_s=10)
+            # Edge may bring one of its own startup tabs to the front at any time during the
+            # automated session; a real user's Shorts tab stays in front.
+            wait_until(shorts_in_front, timeout_s=10, step_s=0.3)
+            assert wait_until(lambda: controller.check(action).ready, timeout_s=10), (
+                controller.check(action),
+                worker.eval(
+                    "chrome.tabs.query({}).then(ts => JSON.stringify(ts.map(t => "
+                    "[t.active, (t.url || '').slice(0, 60)])))"
+                ),
+            )
             started = time.perf_counter()
             result = controller.execute(action, uuid.uuid4().hex, 3.0)
             print(
