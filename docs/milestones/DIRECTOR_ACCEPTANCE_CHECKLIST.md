@@ -1,5 +1,7 @@
 # Director acceptance checklist (Engineering Brief 003, release candidate 0.3.0rc1)
 
+> **Brief 004 (0.4.0b1):** start with `BRIEF_004_VALIDATION.md`. Since 0.4 moving the finger **up** shows the next Short and **down** the previous one; the swipe items below are written for the new direction.
+
 One consolidated checklist for everything implemented in Briefs 002 and 003. It replaces
 `M2_M3_DIRECTOR_CHECKLIST.md` (whose thumbs-up and open-hand-sweep items are superseded). No
 source code is needed. Mark each item pass / fail and add a short note; send the result (or
@@ -60,13 +62,13 @@ Choose **Gesture test**. Watch the banner on the video and the gesture history.
 
 Open a YouTube Shorts page in Edge and let it play. Click **Live control** (red bar).
 
-- [ ] Swipe down -> next Short ("succeeded" in the history); swipe up -> previous Short.
+- [ ] Finger up -> next Short ("succeeded" in the history); finger down -> previous Short.
 - [ ] One swipe moves exactly one Short (repeat a few times).
 - [ ] Open two more ordinary tabs to the right of the Shorts tab, go back to Shorts.
       Swipe right -> the next tab becomes active; swipe right again -> the next one; at the last
       tab -> "rejected - already at the last tab", nothing changes (no wrap-around).
-- [ ] Swipe left until you are back on the Shorts tab; swipe down works again there.
-- [ ] On a non-YouTube tab, swipe down -> "rejected - no YouTube Shorts tab is active".
+- [ ] Swipe left until you are back on the Shorts tab; finger up works again there.
+- [ ] On a non-YouTube tab, finger up -> "rejected - no YouTube Shorts tab is active".
 - [ ] Click into the Interactive Scrolling window (browser not focused) and swipe right ->
       "rejected - the browser is not the active window"; no other application switches.
 - [ ] With a second Edge window open, tab swipes only change tabs in the window you are using.

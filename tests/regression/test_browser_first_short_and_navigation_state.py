@@ -89,3 +89,21 @@ def test_command_after_a_navigation_waits_for_the_new_short_report(server) -> No
         assert wait_until(lambda: controller.check(ActionType.NEXT_SHORT).ready)
     finally:
         ext.close()
+
+
+def test_shorts_session_does_not_end_while_the_short_changes(server) -> None:
+    """The Director's log showed the Shorts session ending and starting again around every
+    navigation; a briefly missing page state is transient and keeps the session."""
+    bridge, controller, sessions = server
+    ext = FakeExtension(bridge.port)
+    try:
+        ext.context()
+        assert wait_until(lambda: sessions == [True])
+        ext.context(shorts=False)
+        assert wait_until(lambda: controller.check(ActionType.NEXT_SHORT).transient)
+        controller.refresh()
+        ext.context(video_id="bcdefghijkl")
+        assert wait_until(lambda: controller.check(ActionType.NEXT_SHORT).ready)
+        assert sessions == [True]
+    finally:
+        ext.close()

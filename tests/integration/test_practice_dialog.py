@@ -117,3 +117,21 @@ def test_quick_calibration_measures_applies_and_records(qtbot, tmp_path) -> None
     dialog.restore_defaults()
     assert services.user_settings.gestures.preset is SensitivityPreset.BALANCED
     assert not services.user_settings.calibration.has_heart
+
+
+def test_main_window_opens_one_practice_dialog_and_feeds_it_frames(qtbot, tmp_path) -> None:
+    from tests.integration.test_control_ui import make_window, start
+
+    window, services = make_window(qtbot, tmp_path)
+    start(qtbot, window)
+    window.gesture_panel.practice_requested.emit()
+    first = window.practice_dialog
+    window.gesture_panel.practice_requested.emit()
+    assert window.practice_dialog is first
+    assert services.dispatcher.mode is ControlMode.GESTURE_TEST
+    first.start("practice")
+    qtbot.waitUntil(lambda: first.video.frame is not None, timeout=5000)
+    # The scripted hand swipes up every 3 s; Practice counts it without any browser action.
+    qtbot.waitUntil(lambda: first.successes >= 1 or first.index > 0, timeout=8000)
+    first.close()
+    assert services.dispatcher.mode is ControlMode.TRACKING_ONLY

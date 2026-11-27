@@ -4,10 +4,11 @@ Hands-free YouTube Shorts and browser control with ordinary laptop webcam gestur
 playful computer-vision effects, simple personal usage reports and a two-person co-op mode.
 Free and open source. All camera processing runs locally on your computer.
 
-> **Status: release candidate 0.3.0rc1 (not a stable release).** Everything below is
-> implemented and covered by automated tests; the Director's hands-on acceptance (real
-> gestures, real browser and account, two computers for co-op) is still pending. See
-> [PROJECT_STATUS.md](PROJECT_STATUS.md) for what is verified and what is not.
+> **Status: beta 0.4.0b1 (not a stable release).** Everything below is implemented and
+> covered by automated tests; gesture recognition was reworked after the Director's first
+> real-world test, and the Director's validation (real gestures, signed-in browser, two
+> computers for co-op) is still pending. See [PROJECT_STATUS.md](PROJECT_STATUS.md) for what is
+> verified and what is not, and the [gesture guide](docs/guides/GESTURE_GUIDE.md).
 
 ## Features
 
@@ -15,13 +16,16 @@ Free and open source. All camera processing runs locally on your computer.
 
 | Gesture | Default action |
 |---|---|
-| Index finger swipe down / up (point and move) | Next / previous YouTube Short |
-| Index finger swipe right / left | Next / previous tab of the active browser window |
+| Move the pointing finger up / down (flick, wrist or hand) | Next / previous YouTube Short |
+| Move the pointing finger to your right / left | Next / previous tab of the active browser window |
 | Half-heart (one half of a two-handed heart), held | Like the Short |
 | Open palm, held | Pause / resume |
 
 Safe control modes (*Tracking only*, *Gesture test*, *Live control*), an emergency stop
 (button, Esc, **Ctrl+Alt+D** anywhere), sensitivity presets, per-gesture on/off and mapping.
+**Practice** explains after every try why a gesture was or was not recognized; **Quick
+Calibration** ([guide](docs/guides/CALIBRATION_GUIDE.md)) adapts it to your movements;
+**Copy diagnostics** exports the recent decisions without personal data.
 Every action is confirmed from the page and reported as succeeded, no change, rejected, failed
 or unknown.
 

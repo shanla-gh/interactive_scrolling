@@ -37,6 +37,12 @@ from the packaged build. A second, clean Windows computer is part of the Directo
 (section 8). Browser extension installation stays manual (*Load unpacked*); it is not published
 to any extension store.
 
+## Brief 004 (0.4.0b1)
+
+Rebuilt 2026-11-27: `dist\InteractiveScrolling-0.4.0b1-windows-x64.zip`; `--self-test` with an
+empty data folder PASS (three models verified, hand/segmentation/face inference ok, settings and
+statistics created). Same machine; the second-computer check remains open.
+
 ## Release status
 
 0.3.0rc1 is a **release candidate**, not a stable release. No release tag was created and

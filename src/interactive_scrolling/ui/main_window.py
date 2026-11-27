@@ -922,6 +922,11 @@ class MainWindow(QMainWindow):
     def open_practice(self) -> None:
         from interactive_scrolling.ui.practice_dialog import PracticeDialog
 
+        existing = getattr(self, "practice_dialog", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
         dialog = PracticeDialog(self.services, self._data_folder(), self)
         self.practice_dialog = dialog
         dialog.finished.connect(lambda _: setattr(self, "practice_dialog", None))
