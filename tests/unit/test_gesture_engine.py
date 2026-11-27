@@ -277,7 +277,12 @@ def test_open_hand_moving_sideways_is_not_a_swipe() -> None:
 
 
 def test_closed_hand_moving_sideways_is_not_a_swipe() -> None:
-    events, _ = run([Hand(stroke((700, 400), (560, 400), 0.8, 0.25), pose=lambda t: FIST)], 2.0)
+    """With "pointing finger only" (Brief 006: no longer the default; any hand shape is, see
+    tests/unit/test_unified_motion.py) a fist moving is not a swipe."""
+    finger_only = replace(GestureSettings(), control_style="finger")
+    events, _ = run(
+        [Hand(stroke((700, 400), (560, 400), 0.8, 0.25), pose=lambda t: FIST)], 2.0, finger_only
+    )
     assert events == []
 
 

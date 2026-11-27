@@ -133,6 +133,9 @@ pose label, which flips only once the finger is almost straight again)."""
 FLICK_RECOVERY_PALMS = 0.25
 SCALE_TIME_CONSTANT_S = 0.25
 END_WAIT_MAX_S = 0.3
+DOWN_WAIT_MAX_S = 0.6
+"""Longest wait for a downward whole-hand stroke to stop (``DetectorConfig.down_at_stop``);
+recorded downward hand swipes stopped 0.2-0.5 s after reaching the distance."""
 """``confirm="end"``: a qualified stroke is confirmed when it stops, at the latest this long
 after it met all criteria."""
 MAX_TRAVEL_PALMS = 4.5
@@ -142,6 +145,15 @@ stops inside the picture (Brief 005: a hand dropped out of view had its wrist at
 downward swipes at 0.62-0.74)."""
 """``confirm="end"``: a stroke that travels further than this before stopping is a large arm
 movement (for example lowering the hand out of view), not a swipe."""
+GAP_S = 0.1
+"""Brief 006: a longer interval between two samples of the control hand is a tracking gap.
+A stroke never *starts* across one (the displacement during the gap was not observed: a hand
+lost at rest and found elsewhere is not a movement), and a stroke in progress survives one
+only if the jump is physically plausible (``MAX_GAP_SPEED``)."""
+MAX_GAP_SPEED = 25.0
+"""Hand lengths per second implied by the jump across a gap above which it is a tracking
+artifact (re-acquisition at another place, a switch to another hand); recorded swipes peaked
+below 24 (finger flicks) and 9 (whole hand)."""
 STATIC_WINDOW_S = 0.3
 STATIC_MAX_DRIFT_PALMS = 0.25
 """``static_still="window"``: the palm may drift at most this far within ``STATIC_WINDOW_S``."""
@@ -170,6 +182,8 @@ class RecognizerOptions:
     """``"early"``: confirm as soon as all criteria are met; ``"end"``: wait until the stroke
     stops inside the view (rejects hands leaving the picture, costs latency)."""
 
+    gap_rule: bool = True
+    """Strokes do not start across tracking gaps; implausible jumps end a stroke (Brief 006)."""
     ghost_hands: bool = True
     """A second hand that appears overlapping the control hand for a moment is a duplicate
     detection of the same hand (motion blur), not a second hand (Brief 006)."""
@@ -191,6 +205,7 @@ class RecognizerOptions:
 
 V03_OPTIONS = RecognizerOptions(
     ghost_hands=False,
+    gap_rule=False,
     arming="still",
     pose_rule="fraction",
     scale="stroke_max",
@@ -225,6 +240,18 @@ class DetectorConfig:
     """The reference must have been still (net drift <= ``ORIGIN_STILL_DRIFT``) for this long
     right before the stroke: a fist that is *presented* and then moved, not a closed hand that
     is repositioned in the middle of other movement."""
+    max_step_palms: float = 0.0
+    """Reject a stroke whose reference moves more than this between two frames (0 = off): a
+    jump of several hand lengths is a tracking artifact (the tracker switching between hands
+    or re-acquiring one), not a movement. Real swipes moved at most 0.41 per frame."""
+    max_start_lowest_y: float = 0.0
+    """A stroke may not start while the lowest landmark is below this (normalized image
+    height; 0 = off): a hand partly out of view at the bottom is resting or typing."""
+    shape_free: bool = False
+    """The hand shape may change freely during the stroke (only the onset shape counts)."""
+    down_at_stop: bool = False
+    """A downward stroke is confirmed only once the hand stops inside the view: a whole hand
+    moving down cannot otherwise be told from a hand being lowered out of the picture."""
 
 
 FINGER = DetectorConfig("finger", "fingertip", 0.25, 0.6, 0.06, flicks=True, require_origin=False)
@@ -234,6 +261,22 @@ FIST = DetectorConfig(
 PALM = DetectorConfig(
     "palm", "palm", 0.45, 0.7, 0.25, flicks=False, require_origin=True, origin_still_s=0.25
 )
+HAND = DetectorConfig(
+    "hand",
+    "palm",
+    0.45,
+    0.7,
+    0.25,
+    flicks=False,
+    require_origin=True,
+    origin_still_s=0.4,
+    max_step_palms=1.0,
+    max_start_lowest_y=0.92,
+    shape_free=True,
+    down_at_stop=True,
+)
+"""Brief 006: whole-hand translation with any hand shape (palm centre), activated by a hand
+that was settled before the movement."""
 ORIGIN_STILL_DRIFT = 0.25
 
 
@@ -381,6 +424,7 @@ class _Stroke:
     onset_seen: bool = True
     """The recognizer saw the hand before this stroke started (it was not already moving when
     it was detected)."""
+    last_pos: Vector | None = None
 
 
 @dataclass(slots=True)
@@ -441,6 +485,7 @@ class DirectionalSwipeRecognizer:
         self._pose_history: deque[tuple[int, bool]] = deque()
         self._flick: _PendingFlick | None = None
         self._positions: deque[tuple[int, Vector]] = deque()
+        self._after_gap = False
         self.phase = GesturePhase.REARMING if rearm else GesturePhase.IDLE
 
     def block_until(self, timestamp_ns: int) -> None:
@@ -581,6 +626,10 @@ class DirectionalSwipeRecognizer:
         if self.options.pose_rule == "fraction":
             return "now" if fraction >= self.pose_fraction and stroke.pose_frames >= 2 else ""
         if self.detector.require_origin:
+            if self.detector.shape_free:
+                # Whole-hand motion: only the shape at the onset counts; the fingers may open,
+                # close or point while the hand moves (Brief 006).
+                return "now" if stroke.origin_pose else ""
             # Fist / palm: activated by the held pose, which must stay mostly visible.
             held = pose_now or fraction >= ENDPOINT_POSE_FRACTION
             return "now" if stroke.origin_pose and held else ""
@@ -636,6 +685,8 @@ class DirectionalSwipeRecognizer:
     def update(self, sample: HandSample) -> Step:
         ts = sample.timestamp_ns
         position = self._pos(sample)
+        previous = self._positions[-1] if self._positions else None
+        gap = previous is not None and _seconds(ts - previous[0]) > GAP_S
         self._positions.append((ts, position))
         while self._positions and self._positions[0][0] < ts - int(2.0 * NS_PER_S):
             self._positions.popleft()
@@ -662,6 +713,33 @@ class DirectionalSwipeRecognizer:
             self._stroke = None
             self._rest = (position, ts)
             stroke = None
+
+        self._after_gap = bool(gap and self.options.gap_rule)
+        if gap and self.options.gap_rule:
+            jump = math.dist(position, previous[1]) / scale / _seconds(ts - previous[0])
+            if stroke is None:
+                # Never measure a stroke from where the hand was before it was lost.
+                self._rest = (position, ts)
+                self._update_phase(ts)
+                return Step()
+            if jump > MAX_GAP_SPEED:
+                self._stroke = None
+                self._flick = None
+                self._rest = (position, ts)
+                self._update_phase(ts)
+                if stroke.is_return or stroke.blocked:
+                    return Step()
+                return Step(
+                    rejection=GestureRejection(
+                        stroke.gesture,
+                        "tracking jump (not a movement)",
+                        ts,
+                        RejectCode.TRACKING_LOST,
+                        _round(jump),
+                        MAX_GAP_SPEED,
+                        "palms/s",
+                    )
+                )
 
         gesture, v_axis, v_cross = dominant_direction(v_user)
         self._arm(sample, speed, v_axis)
@@ -712,6 +790,10 @@ class DirectionalSwipeRecognizer:
         v_axis = _dot(v_user, direction)
         stroke.peak_px = max(stroke.peak_px, v_axis * scale)
         peak = stroke.peak_px / scale
+        step_palms = 0.0
+        if stroke.last_pos is not None:
+            step_palms = math.dist(self._pos(sample), stroke.last_pos) / scale
+        stroke.last_pos = self._pos(sample)
         d = self._displacement(self._pos(sample), stroke.start_pos, scale)
         d_axis = _dot(d, direction)
         d_cross = _across(d, direction)
@@ -738,6 +820,21 @@ class DirectionalSwipeRecognizer:
                 )
             )
 
+        if 0 < self.detector.max_step_palms < step_palms:
+            return reject(
+                RejectCode.TRACKING_LOST,
+                "tracking jump (not a movement)",
+                step_palms,
+                self.detector.max_step_palms,
+                "palms",
+            )
+        if self._after_gap and (d_axis >= distance or v_axis <= -START_SPEED or d_axis < -0.2):
+            # Right after a tracking gap the position is a single re-acquired observation:
+            # neither a confirmation nor a reversal is decided on it (the next frame shows
+            # whether the hand is really there and still moving).
+            if stroke.is_return or stroke.blocked:
+                return Step()
+            return Step(candidate=GestureCandidate(gesture, min(1.0, d_axis / distance), elapsed))
         if d_axis >= distance and not stroke.observed:
             if d_cross * s.direction_ratio > d_axis:
                 angle = math.degrees(math.atan2(d_cross, d_axis))
@@ -819,6 +916,15 @@ class DirectionalSwipeRecognizer:
                 )
                 return Step(candidate=GestureCandidate(gesture, 1.0, elapsed))
             leaving = gesture is GestureType.INDEX_SWIPE_DOWN and sample.lowest_y > BOTTOM_ZONE
+            if gesture is GestureType.INDEX_SWIPE_DOWN and self.detector.down_at_stop:
+                # Confirmed once the hand stops (or after DOWN_WAIT_MAX_S) while still tracked;
+                # a hand lowered out of view is lost first and the candidate is cancelled.
+                if not stroke.qualified_ns:
+                    stroke.qualified_ns = ts
+                waited = _seconds(ts - stroke.qualified_ns)
+                if v_axis >= STALL_SPEED and waited < DOWN_WAIT_MAX_S:
+                    return Step(candidate=GestureCandidate(gesture, 1.0, elapsed))
+                return self._confirm(stroke, sample, d_axis, peak, elapsed)
             if leaving and self.options.confirm != "end":
                 # Near the bottom of the picture a downward stroke may be the hand being lowered
                 # out of view (a recorded false swipe): confirm only once it stops in view.
@@ -989,6 +1095,8 @@ class DirectionalSwipeRecognizer:
         if self.options.pose_rule == "fraction" and not pose_now:
             return Step()
         activated = True
+        if self.detector.max_start_lowest_y and sample.lowest_y > self.detector.max_start_lowest_y:
+            return Step()
         if self.detector.require_origin and not (
             self._recent_pose(ts) and self._was_still(start_ns, sample)
         ):
@@ -1230,3 +1338,12 @@ def fist(pose: HandPose) -> bool:
 
 def open_hand(pose: HandPose) -> bool:
     return pose.label is PoseLabel.OPEN_PALM
+
+
+def hand_shape(pose: HandPose) -> bool:
+    """Onset shapes handled by the whole-hand path (Brief 006): every shape except a pointing
+    hand (the fingertip path handles it, including finger flicks) and the static gestures
+    (moving the hand away after a half-heart or the stop pose is a release, not a swipe)."""
+    if pose.label in (PoseLabel.POINTING, PoseLabel.HALF_HEART):
+        return False
+    return not pose.is_stop_pose

@@ -47,6 +47,7 @@ from interactive_scrolling.gestures.types import GestureEvent
 from interactive_scrolling.services import ControlServices, offline_services
 from interactive_scrolling.storage.settings_store import (
     CALIBRATION_REPAIR_NOTICE,
+    MOTION_STYLE_NOTICE,
     VERTICAL_DIRECTION_NOTICE,
 )
 from interactive_scrolling.ui.appearance_dialog import AppearanceDialog
@@ -946,6 +947,7 @@ class MainWindow(QMainWindow):
         titles = {
             VERTICAL_DIRECTION_NOTICE: "SCROLL DIRECTION UPDATED",
             CALIBRATION_REPAIR_NOTICE: "CALIBRATION RESET - PLEASE RECALIBRATE",
+            MOTION_STYLE_NOTICE: "SWIPES NOW WORK WITH ANY HAND SHAPE",
         }
         notices = [m for m in store.migrations if m in titles]
         for notice in notices:

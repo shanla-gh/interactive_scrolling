@@ -63,6 +63,7 @@ from interactive_scrolling.gestures.recognizers import (
     STATIC_MAX_DRIFT_PALMS,
     STATIC_WINDOW_S,
     SWIPE_DIRECTIONS,
+    hand_shape,
     swipe_distance,
     to_user,
 )
@@ -173,7 +174,7 @@ class PromptResult:
                     out.append("No movement detected.")
             elif any(not (s.pointing_before or s.pointing_after) for s in self.demos):
                 out.append(
-                    "Close your hand into a fist, hold it still briefly, then move it."
+                    "Hold the hand still for a moment, then move it (any shape, not pointing)."
                     if self.detector == "fist"
                     else "Point with your index finger while you move."
                 )
@@ -412,7 +413,7 @@ class CalibrationCollector:
                     hand.palm.position_px,
                     hand.palm.velocity_px_s,
                     pose.scale_px,
-                    pose.label is PoseLabel.FIST,
+                    hand_shape(pose),
                 )
             elif result.gesture in SWIPES:
                 self._segmenter.add(

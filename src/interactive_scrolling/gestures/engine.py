@@ -38,6 +38,7 @@ from interactive_scrolling.core.timing import NS_PER_S
 from interactive_scrolling.gestures.pose import PoseLabel, analyze_pose, matches_personal_heart
 from interactive_scrolling.gestures.recognizers import (
     FIST,
+    HAND,
     PALM,
     DirectionalSwipeRecognizer,
     HandSample,
@@ -46,6 +47,7 @@ from interactive_scrolling.gestures.recognizers import (
     Step,
     fist,
     half_heart,
+    hand_shape,
     open_hand,
     pointing,
     stop_pose,
@@ -125,6 +127,9 @@ class GestureEngine:
         self.palm_swipes = DirectionalSwipeRecognizer(
             s, pose_ok=open_hand, options=o, detector=PALM
         )
+        self.hand_swipes = DirectionalSwipeRecognizer(
+            s, pose_ok=hand_shape, options=o, detector=HAND
+        )
         self.heart = StaticPoseRecognizer(
             GestureType.HALF_HEART,
             self._half_heart,
@@ -183,7 +188,10 @@ class GestureEngine:
             )
             if on
         )
-        self.swipes.enabled = directions if s.control_style in ("finger", "hybrid") else frozenset()
+        self.swipes.enabled = (
+            directions if s.control_style in ("finger", "hybrid", "motion") else frozenset()
+        )
+        self.hand_swipes.enabled = directions if s.control_style == "motion" else frozenset()
         self.fist_swipes.enabled = (
             directions if s.control_style in ("fist", "hybrid") else frozenset()
         )
@@ -204,7 +212,7 @@ class GestureEngine:
         return out
 
     def _swipe_detectors(self) -> tuple[DirectionalSwipeRecognizer, ...]:
-        return (self.swipes, self.fist_swipes, self.palm_swipes)
+        return (self.swipes, self.fist_swipes, self.palm_swipes, self.hand_swipes)
 
     def _all(self) -> tuple[DirectionalSwipeRecognizer | StaticPoseRecognizer, ...]:
         return (*self._swipe_detectors(), self.heart, self.stop)

@@ -219,7 +219,7 @@ _RANGES: dict[str, tuple[float, float]] = {
     "swipe_right_distance_palms": (0.0, 3.0),
     "fist_swipe_distance_palms": (0.15, 3.0),
 }
-CONTROL_STYLES = ("finger", "fist", "hybrid")
+CONTROL_STYLES = ("finger", "fist", "hybrid", "motion")
 
 GESTURE_ENABLE_FIELDS = (
     "enable_swipe_down",
@@ -276,7 +276,7 @@ class GestureSettings:
     swipe_left_distance_palms: float = 0.0
     swipe_right_distance_palms: float = 0.0
     """Per-direction finger-swipe distances from Quick Calibration; 0 = shared value."""
-    control_style: str = "finger"
+    control_style: str = "motion"
     """``finger`` (index swipes), ``fist`` (closed-hand swipes) or ``hybrid`` (both)."""
     fist_swipe_distance_palms: float = 0.5
     """Palm-centre travel of a fist (or palm) swipe."""

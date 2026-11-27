@@ -51,7 +51,7 @@ from interactive_scrolling.storage.paths import data_dir
 
 log = logging.getLogger(__name__)
 
-SETTINGS_VERSION = 4
+SETTINGS_VERSION = 5
 
 _V1_RENAMED = {
     "finger_swipe_min_distance_palms": "swipe_min_distance_palms",
@@ -278,6 +278,23 @@ CALIBRATION_REPAIR_NOTICE = (
 )
 
 
+MOTION_STYLE_NOTICE = (
+    "Swipes now work with any hand shape: point, make a fist or move an open or relaxed hand - "
+    "hold it still for a moment, then move it. For fewer accidental swipes choose Gesture "
+    "settings > Swipe with > Pointing finger only."
+)
+
+
+def _migrate_style_v05(gestures: GestureSettings, migrations: list[str]) -> GestureSettings:
+    """Brief 006: one motion engine for every hand shape replaces the 0.5 choice between finger,
+    fist and finger-or-fist swipes (finger was the default); the rejected open-palm experiment
+    is switched off."""
+    if gestures.control_style == "motion" and not gestures.enable_palm_swipes:
+        return gestures
+    migrations.append(MOTION_STYLE_NOTICE)
+    return replace(gestures, control_style="motion", enable_palm_swipes=False)
+
+
 def _repair_v04_calibration(
     gestures: GestureSettings, calibration: CalibrationProfile, migrations: list[str]
 ) -> GestureSettings:
@@ -372,6 +389,8 @@ class SettingsStore:
             log.warning("Settings: %s", warning)
         if version <= 3:
             gestures = _repair_v04_calibration(gestures, sections["calibration"], self.migrations)
+        if version <= 4 and isinstance(gesture_data, dict):
+            gestures = _migrate_style_v05(gestures, self.migrations)
         return UserSettings(gestures, mapping, analytics, port, token, **sections)
 
     def _backup_v1(self) -> None:

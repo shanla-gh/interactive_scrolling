@@ -70,7 +70,9 @@ SEQUENCE = (
     G.HALF_HEART,
     G.STOP_GESTURE,
 )
-METHODS = (("finger", "Finger swipes"), ("fist", "Fist swipes (experimental)"))
+METHODS = (("finger", "Pointing finger"), ("fist", "Whole hand, any shape"))
+"""Swipe methods of Practice and Quick Calibration. ``fist`` is the whole-hand path (palm
+centre, any hand shape that is not pointing; Brief 006); the key is kept from version 0.5."""
 
 
 def steps_for(method: str) -> list[tuple[GestureType, str]]:
@@ -314,12 +316,12 @@ class PracticeDialog(QDialog):
         self.results = {}
         self.fist_results = {}
         if self.method == "fist" and self.services.engine.settings.control_style == "finger":
-            # Fist swipes are experimental: switched on for this window only.
+            # "Pointing finger only" is set: whole-hand swipes are switched on for this window.
             from dataclasses import replace
 
             self._restore_settings = self.services.engine.settings
             self.services.engine.request_settings(
-                replace(self._restore_settings, control_style="hybrid")
+                replace(self._restore_settings, control_style="motion")
             )
         if self.record_box.isChecked():
             self.services.recorder.start()
@@ -415,7 +417,7 @@ class PracticeDialog(QDialog):
                 item.widget().deleteLater()
         for index, (gesture, detector) in enumerate(self.steps):
             name = LABELS[gesture].replace("_", "-")
-            button = QPushButton(f"Redo {'fist ' if detector == 'fist' else ''}{name}")
+            button = QPushButton(f"Redo {'hand ' if detector == 'fist' else ''}{name}")
             button.clicked.connect(lambda _=False, i=index: self.recalibrate(i))
             self.redo_row.addWidget(button)
 
@@ -461,7 +463,12 @@ class PracticeDialog(QDialog):
         gesture, detector = self.current
         if record.event.gesture is not gesture:
             return False
-        return not gesture.is_dynamic or (record.event.detector or "finger") == detector
+        if not gesture.is_dynamic:
+            return True
+        made = record.event.detector or "finger"
+        if detector == "fist":
+            return made in ("fist", "hand")
+        return made == detector
 
     def _tick(self) -> None:
         records = []

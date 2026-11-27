@@ -93,6 +93,7 @@ def score(
     table: Table,
     name: str,
     mirror: bool = False,
+    sweeps: bool = True,
 ) -> None:
     analyzer = MotionAnalyzer()
     engine = GestureEngine(settings, options)
@@ -114,7 +115,7 @@ def score(
             or sizes[(index, label)] < MIN_SEGMENT_FRAMES
         ):
             continue
-        e = expectation_for(label, mirror)
+        e = expectation_for(label, mirror, any_pose=sweeps)
         if e is None:
             continue
         got = Counter(ev.gesture for ev in evs)
@@ -208,6 +209,12 @@ def main() -> int:
     )
     parser.add_argument("--mirror", action="store_true", help="also score mirrored dev recordings")
     parser.add_argument("--failing", action="store_true", help="list failing dev segments")
+    parser.add_argument(
+        "--sweeps-negative",
+        action="store_true",
+        help="score the v0.2 open-hand sweeps as negatives (Brief 005) instead of as horizontal "
+        "swipes (Brief 006: the hand shape does not matter)",
+    )
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
 
@@ -236,7 +243,14 @@ def main() -> int:
     for path in args.recordings:
         frames = load(path)
         held = any(fnmatch.fnmatch(path.name, pattern) for pattern in args.holdout)
-        score(frames, settings, options, holdout if held else dev, path.stem)
+        score(
+            frames,
+            settings,
+            options,
+            holdout if held else dev,
+            path.stem,
+            sweeps=not args.sweeps_negative,
+        )
         if args.synthetic and not held:
             score(fist_segments(frames), settings, options, synthetic, path.stem + "+fist")
             score(

@@ -68,18 +68,22 @@ _FIST_WORD = {
 
 def instruction(gesture: GestureType, detector: str = "finger") -> tuple[str, str]:
     """(short title, one-paragraph explanation) for ``gesture`` made with ``detector``."""
-    if detector == "fist" and gesture in _FIST_WORD:
+    if detector in ("fist", "hand") and gesture in _FIST_WORD:
         word = _FIST_WORD[gesture]
         return (
-            f"Move your FIST {word}",
-            f"Close your hand into a fist, hold it still for a moment, then move it {word.lower()}"
-            " with a small, quick movement of the wrist or hand. Then let it come back.",
+            f"Move your HAND {word}",
+            f"Any hand shape (a fist, an open or a relaxed hand): hold the hand still for a "
+            f"moment, then move it {word.lower()} with a quick movement of the wrist or hand. "
+            "Then let it come back.",
         )
     return INSTRUCTIONS[gesture]
 
 
 def event_label(gesture: GestureType, detector: str = "") -> str:
-    """Display name of a recognized gesture, naming the detector for fist and palm swipes."""
+    """Display name of a recognized gesture, naming how a swipe was made when it was not made
+    with a pointing finger."""
+    if detector == "hand":
+        return f"{gesture.label} (whole hand)"
     if detector in ("fist", "palm"):
         return f"{gesture.label} ({detector})"
     return gesture.label

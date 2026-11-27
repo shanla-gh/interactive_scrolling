@@ -6,6 +6,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from interactive_scrolling.actions.types import DEFAULT_MAPPING, ActionType
 from interactive_scrolling.config.settings import (
     ControlHandPreference,
@@ -15,6 +17,7 @@ from interactive_scrolling.config.settings import (
 from interactive_scrolling.gestures.types import GestureType
 from interactive_scrolling.storage.settings_store import (
     DEFAULT_BRIDGE_PORT,
+    MOTION_STYLE_NOTICE,
     SETTINGS_VERSION,
     VERTICAL_DIRECTION_NOTICE,
     SettingsStore,
@@ -319,10 +322,10 @@ def test_control_style_survives_a_named_preset(tmp_path: Path) -> None:
     path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "gestures": {
                     "preset": "balanced",
-                    "control_style": "hybrid",
+                    "control_style": "finger",
                     "enable_palm_swipes": True,
                 },
                 "pairing_token": "an-existing-pairing-token",
@@ -331,4 +334,31 @@ def test_control_style_survives_a_named_preset(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     g = SettingsStore(path).load().gestures
-    assert g.control_style == "hybrid" and g.enable_palm_swipes is True
+    assert g.control_style == "finger" and g.enable_palm_swipes is True
+
+
+@pytest.mark.parametrize("style", ["finger", "fist", "hybrid"])
+def test_version_4_swipe_styles_become_any_hand_shape_with_a_notice(
+    tmp_path: Path, style: str
+) -> None:
+    """Brief 006: one motion engine for every hand shape replaces the 0.5 styles (finger was
+    the default), so every 0.5 file moves to it once and the user is told how to go back."""
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "gestures": {"control_style": style, "enable_palm_swipes": True},
+                "pairing_token": "an-existing-pairing-token",
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = SettingsStore(path)
+    g = store.load().gestures
+    assert g.control_style == "motion" and g.enable_palm_swipes is False
+    assert MOTION_STYLE_NOTICE in store.migrations
+    store.save(store.load())
+    again = SettingsStore(path)
+    again.load()
+    assert MOTION_STYLE_NOTICE not in again.migrations
