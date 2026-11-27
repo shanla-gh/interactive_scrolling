@@ -62,6 +62,8 @@ class Expectation:
     """For segments where the performer may repeat: accepted range [low, count]."""
     allowed: frozenset[GestureType] = frozenset()
     """Gestures that do not count as false triggers in this segment."""
+    also: tuple[tuple[GestureType, int], ...] = ()
+    """Further expected gestures of the segment (e.g. an intentional reversal)."""
 
 
 # Labels of record_gestures.py sessions 1-3. Version 0.2 gestures that Brief 003 replaced are
@@ -100,7 +102,24 @@ EXPECTATIONS: dict[str, Expectation] = {
     "neg_c_shape": Expectation("negative: C-shaped hand"),
     "neg_diagonal": Expectation("negative: diagonal pointing movements"),
     "neg_open_hold": Expectation("negative: open hand held", allowed=frozenset({G.STOP_GESTURE})),
+    # session 4 (Brief 004): evaluation part only; calib_* segments are for calibration
+    "eval_up_x5": Expectation("index swipe up", G.INDEX_SWIPE_UP, 5),
+    "eval_down_x5": Expectation("index swipe down", G.INDEX_SWIPE_DOWN, 5),
+    "eval_right_x5": Expectation("index swipe right", G.INDEX_SWIPE_RIGHT, 5),
+    "eval_left_x5": Expectation("index swipe left", G.INDEX_SWIPE_LEFT, 5),
+    "eval_up_then_down": Expectation(
+        "intentional reversal (up, then down)",
+        G.INDEX_SWIPE_UP,
+        2,
+        also=((G.INDEX_SWIPE_DOWN, 2),),
+    ),
+    "eval_half_heart_x4": Expectation("half-heart", G.HALF_HEART, 4),
+    "eval_stop_x3": Expectation("stop pose", G.STOP_GESTURE, 3),
+    "neg_point_and_drop": Expectation("negative: pointing hand dropped / relaxed"),
 }
+CALIBRATION_PREFIX = "calib_"
+"""Calibration demonstrations are not scored (they are not independent of a calibrated
+profile); scripts/simulate_calibration.py uses them."""
 SYNTHETIC_HORIZONTAL = {
     "point_down_x4": ("synthetic_right_x4", G.INDEX_SWIPE_RIGHT),
     "point_up_x4": ("synthetic_left_x4", G.INDEX_SWIPE_LEFT),
@@ -139,6 +158,7 @@ def expectation_for(label: str, mirrored: bool, any_pose: bool = False) -> Expec
     else:
         return None
     if mirrored and e.gesture in _MIRRORED:
+        e = replace(e, also=tuple((_MIRRORED.get(g, g), n) for g, n in e.also))
         e = replace(
             e,
             gesture=_MIRRORED[e.gesture],
@@ -272,15 +292,13 @@ def evaluate(
             false += max(0, allowed_extra - 1)  # e.g. at most one STOP for an open-hand hold
             ok = false == 0
         else:
-            row.expected += expectation.count
-            hits = got[expectation.gesture]
-            row.detected += min(hits, expectation.count)
-            false = max(0, hits - expectation.count) + sum(
-                n
-                for g, n in got.items()
-                if g is not expectation.gesture and g not in expectation.allowed
+            wanted = {expectation.gesture: expectation.count, **dict(expectation.also)}
+            row.expected += sum(wanted.values())
+            row.detected += sum(min(got[g], n) for g, n in wanted.items())
+            false = sum(max(0, got[g] - n) for g, n in wanted.items()) + sum(
+                n for g, n in got.items() if g not in wanted and g not in expectation.allowed
             )
-            ok = hits == expectation.count and false == 0
+            ok = all(got[g] == n for g, n in wanted.items()) and false == 0
         row.false_triggers += false
         if not ok:
             row.failing_segments.append(f"{name}#{index}")

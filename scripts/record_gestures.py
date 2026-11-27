@@ -7,7 +7,9 @@ Recordings are written to ``recordings/`` (ignored by Git) and are replayed by
 ``scripts/evaluate_gestures.py``.
 
 Usage:
-    python scripts/record_gestures.py
+    python scripts/record_gestures.py --session 4 --hand right     (Brief 004, ~5 min)
+    python scripts/record_gestures.py --session 4 --hand left
+    python scripts/record_gestures.py --session negatives --minutes 10   (ordinary use)
 """
 
 from __future__ import annotations
@@ -134,13 +136,79 @@ PROMPTS_3: list[tuple[str, float, str]] = [
 ]
 
 
+# Fourth session (Brief 004): first three calibration demonstrations of every gesture (for
+# scripts/simulate_calibration.py), then separate evaluation attempts, an intentional reversal
+# and the negatives that caused false swipes in earlier recordings (dropping or relaxing a
+# pointing hand). Record it once with each hand (--hand).
+PROMPTS_4: list[tuple[str, float, str]] = [
+    ("neg_rest", 4, "Sit normally. Hands relaxed."),
+    ("calib_up", 10, "CALIBRATION: point and move your finger UP, 3 times, comfortably."),
+    ("calib_down", 10, "CALIBRATION: point and move your finger DOWN, 3 times."),
+    ("calib_right", 10, "CALIBRATION: point and move your finger to YOUR RIGHT, 3 times."),
+    ("calib_left", 10, "CALIBRATION: point and move your finger to YOUR LEFT, 3 times."),
+    ("calib_half_heart", 8, "CALIBRATION: show a HALF-HEART, hold it 1 s, lower it - 2 times."),
+    ("calib_stop", 6, "CALIBRATION: OPEN PALM (stop), fingers up, palm to the camera. Hold."),
+    ("neg_rest", 4, "Relax. Now the test part begins."),
+    ("eval_up_x5", 14, "Move your finger UP, 5 times, the way you would to see the next video."),
+    ("neg_rest", 3, "Relax."),
+    ("eval_down_x5", 14, "Move your finger DOWN, 5 times."),
+    ("neg_rest", 3, "Relax."),
+    ("eval_right_x5", 14, "Move your finger to YOUR RIGHT, 5 times."),
+    ("neg_rest", 3, "Relax."),
+    ("eval_left_x5", 14, "Move your finger to YOUR LEFT, 5 times."),
+    ("neg_rest", 3, "Relax."),
+    (
+        "eval_up_then_down",
+        12,
+        "UP (next video), let the hand come back, pause briefly, then DOWN (back). Twice.",
+    ),
+    ("neg_rest", 3, "Relax."),
+    ("eval_half_heart_x4", 16, "HALF-HEART, hold about 1 s, lower it - 4 times."),
+    ("neg_rest", 3, "Relax."),
+    ("half_heart_hold", 6, "HALF-HEART and keep holding it for the whole prompt."),
+    ("neg_rest", 3, "Relax."),
+    ("eval_stop_x3", 14, "OPEN PALM (stop), hold about 1 s, lower it - 3 times."),
+    ("neg_rest", 3, "Relax."),
+    (
+        "neg_point_and_drop",
+        10,
+        "POINT, then drop your hand into your lap. Then relax the finger. Repeat 3 times.",
+    ),
+    ("neg_pinch", 6, "PINCH your thumb and index finger together a few times."),
+    ("neg_c_shape", 6, "Make a C shape (as if holding a cup), move it a little."),
+    ("pose_thumbs_up", 4, "THUMBS UP. Hold still."),
+    ("neg_natural", 12, "Move naturally: touch your face or hair, reach for the mouse, wave."),
+    ("neg_typing", 10, "Pretend to type and use the mouse."),
+]
+
+
+def negatives_session(minutes: float) -> list[tuple[str, float, str]]:
+    """Ordinary computer use for the false-trigger measurement (no gestures at all)."""
+    return [
+        (
+            "neg_ordinary",
+            minutes * 60,
+            "Use the computer as usual: type, use the mouse, drink, touch your face. "
+            "Do NOT make any gesture. The recording stops by itself.",
+        )
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--output-dir", type=Path, default=Path("recordings"))
-    parser.add_argument("--session", type=int, choices=[1, 2, 3], default=3)
+    parser.add_argument("--session", choices=["1", "2", "3", "4", "negatives"], default="4")
+    parser.add_argument("--hand", choices=["right", "left", "either"], default="either")
+    parser.add_argument("--minutes", type=float, default=10.0, help="negatives session length")
     args = parser.parse_args()
-    prompts = {1: PROMPTS, 2: PROMPTS_2, 3: PROMPTS_3}[args.session]
+    prompts = {
+        "1": PROMPTS,
+        "2": PROMPTS_2,
+        "3": PROMPTS_3,
+        "4": PROMPTS_4,
+        "negatives": negatives_session(args.minutes),
+    }[args.session]
     disable_power_throttling()
 
     frames: list[dict] = []
@@ -249,9 +317,16 @@ def main() -> int:
     def finish() -> None:
         pipeline.shutdown()
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        path = args.output_dir / f"gestures_{datetime.now():%Y%m%d_%H%M%S}.json"
+        hand = "" if args.hand == "either" else f"_{args.hand}"
+        name = f"gestures_s{args.session}{hand}_{datetime.now():%Y%m%d_%H%M%S}.json"
+        path = args.output_dir / name
         with lock:
-            payload = {"prompts": prompts, "frames": frames}
+            payload = {
+                "prompts": prompts,
+                "frames": frames,
+                "session": args.session,
+                "hand": args.hand,
+            }
         path.write_text(json.dumps(payload), encoding="utf-8")
         prompt.setText(f"Done. Saved {len(frames)} frames (landmarks only) to {path}")
         print(f"saved {len(frames)} frames to {path}")
