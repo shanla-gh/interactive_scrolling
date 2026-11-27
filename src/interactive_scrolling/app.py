@@ -219,6 +219,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     window.show()
     window.show_startup_notices()
+    window.show_getting_started_if_new()
     if args.auto_start:
         QTimer.singleShot(0, window.start_camera)
     return app.exec()

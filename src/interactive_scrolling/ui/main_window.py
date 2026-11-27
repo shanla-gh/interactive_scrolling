@@ -381,6 +381,10 @@ class MainWindow(QMainWindow):
         )
         self.creator_button.clicked.connect(lambda: self.set_ui_mode("creator"))
         layout.addWidget(self.creator_button)
+        self.help_button = QPushButton("Help")
+        self.help_button.setToolTip("Getting started: camera, browser, practice, Live control")
+        self.help_button.clicked.connect(self.open_getting_started)
+        layout.addWidget(self.help_button)
         self.tray_button = QPushButton("To tray")
         self.tray_button.setToolTip(
             "Hide the windows; the tray icon keeps showing camera and control status"
@@ -961,6 +965,35 @@ class MainWindow(QMainWindow):
         self.practice_dialog = dialog
         dialog.finished.connect(lambda _: setattr(self, "practice_dialog", None))
         dialog.show()
+
+    def open_getting_started(self) -> None:
+        from interactive_scrolling.ui.getting_started import GettingStartedDialog
+
+        existing = getattr(self, "getting_started", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            return
+        user = self.services.user_settings
+        dialog = GettingStartedDialog(user.pairing_token, self.hotkey.label, self)
+        dialog.start_camera_requested.connect(self.start_camera)
+        dialog.practice_requested.connect(self.open_practice)
+        dialog.finished.connect(lambda _: self._getting_started_closed(dialog))
+        self.getting_started = dialog
+        dialog.show()
+
+    def _getting_started_closed(self, dialog) -> None:  # type: ignore[no-untyped-def]
+        self.getting_started = None
+        done = dialog.dont_show.isChecked()
+        appearance = self.services.user_settings.appearance
+        if appearance.getting_started_done != done:
+            from dataclasses import replace
+
+            self.services.update_settings(appearance=replace(appearance, getting_started_done=done))
+
+    def show_getting_started_if_new(self) -> None:
+        """First start: show the guide once (real application only)."""
+        if not self.services.user_settings.appearance.getting_started_done:
+            self.open_getting_started()
 
     def show_startup_notices(self) -> None:
         """One-time notices from settings migrations (e.g. the new scroll direction)."""

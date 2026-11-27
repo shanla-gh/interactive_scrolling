@@ -23,7 +23,7 @@ from ctypes import wintypes
 
 import numpy as np
 from PIL import ImageGrab
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication, QWidget
 
 from interactive_scrolling.config.settings import AppearanceSettings, CreatorSettings, OverlayCorner
@@ -88,6 +88,9 @@ def print_window(hwnd: int) -> np.ndarray:
 def main() -> int:
     app = QApplication(sys.argv[:1])
     backdrop = QWidget()
+    # Topmost as well (shown before the overlay, so it stays beneath it): otherwise any window
+    # on the desktop may lie between the backdrop and the always-on-top overlay.
+    backdrop.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
     backdrop.setStyleSheet("background: #ff00ff;")  # magenta behind the overlay
     backdrop.setGeometry(X - 40, Y - 40, W + 80, H + 80)
     backdrop.show()
@@ -122,12 +125,18 @@ def main() -> int:
     worker.result = AuxResult(worker.mask, now, 1, now)
     overlay.show()
     overlay.move(X, Y)
+    overlay.raise_()
     overlay.show_frame(frame)
     report: dict[str, object] = {}
 
     def capture() -> None:
-        grab = np.asarray(ImageGrab.grab(bbox=(X, Y, X + W, Y + H), all_screens=True))
-        left, right = grab[H // 2, W // 4], grab[H // 2, 3 * W // 4]
+        # The screen grab works in physical pixels; Qt positions windows in logical ones.
+        dpr = overlay.devicePixelRatioF()
+        box = (int(X * dpr), int(Y * dpr), int((X + W) * dpr), int((Y + H) * dpr))
+        grab = np.asarray(ImageGrab.grab(bbox=box, all_screens=True))
+        gh, gw = grab.shape[:2]
+        report["device_pixel_ratio"] = dpr
+        left, right = grab[gh // 2, gw // 4], grab[gh // 2, 3 * gw // 4]
         report["desktop_left_rgb"] = left.tolist()
         report["desktop_right_rgb"] = right.tolist()
         report["desktop_person_opaque"] = bool(left[1] > 150 and left[0] < 80)

@@ -24,7 +24,7 @@ scripts\run.ps1
 - [ ] The window opens; a coloured dot appears in the system tray (grey = camera off).
 - [ ] Browser extension: `edge://extensions` -> the "Interactive Scrolling Bridge" card ->
       **reload** (it is version 0.3.0 now). The Browser tab shows "1 browser connected".
-- [ ] Click **Start camera**. The tray dot turns green; hover shows "camera ON, Tracking only".
+- [ ] Click **Start camera**. The tray dot turns green; hover shows "camera on, Gestures off".
 
 ## 1. Gestures in Gesture test (nothing is executed) (15 min)
 
@@ -75,11 +75,11 @@ Open a YouTube Shorts page in Edge and let it play. Click **Live control** (red 
 - [ ] Stop pose -> pause; stop again -> resume.
 - [ ] **[account]** Half-heart on a Short you are happy to like -> it becomes liked; again ->
       "no change - already liked" (never unlikes).
-- [ ] **Ctrl+Alt+D** while the browser is focused -> Tracking only; gestures do nothing.
+- [ ] **Ctrl+Alt+D** while the browser is focused -> Gestures off; gestures do nothing.
 
 ## 3. Three UI modes (10 min) [OBS]
 
-- [ ] Click **Creator overlay**: the main window hides; a small camera overlay floats on top.
+- [ ] Click **Broadcast Mode**: the main window hides; a small camera overlay floats on top.
       Drag it, resize it from the bottom-right corner, right-click for layers and opacity.
 - [ ] While the overlay is shown and Live control is on, swipe in the browser: the browser keeps
       the keyboard focus (type in the address bar to check); the overlay shows the gesture and
@@ -91,7 +91,7 @@ Open a YouTube Shorts page in Edge and let it play. Click **Live control** (red 
       method, and if needed "allow transparency"/"Display Capture" with a crop) and note which
       setting shows the transparency correctly.
 - [ ] Right-click -> **Background Mode**: all windows hide, the tray dot stays and shows the
-      state; right-click the tray icon: Stop camera / Start camera / Disable control work;
+      state; right-click the tray icon: Stop camera / Start camera / Stop gesture control work;
       **Developer Mode** brings the dashboard back. Camera and Live control kept running
       throughout (no restart).
 - [ ] **Quit** from the tray: the camera light goes off and the process ends.
@@ -122,7 +122,7 @@ Open a YouTube Shorts page in Edge and let it play. Click **Live control** (red 
       you leave the frame. Note any misalignment or flicker.
 - [ ] Set Preview off and thresholds to 1 / 2 / 3 minutes; scroll: the stages appear with the
       session.
-- [ ] Creator overlay with transparent background and the clown together.
+- [ ] Broadcast Mode with transparent background and the clown together.
 - [ ] Enable eye analytics, *Calibrate...* (look at the screen centre 3 s): "Calibrated".
       Scroll for a few minutes, look away sometimes: *Visual behavior* shows facing-the-screen,
       looking-away and unknown durations, blinks, tracking quality. Plausible? (Estimates only.)

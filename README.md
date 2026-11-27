@@ -21,7 +21,7 @@ Free and open source. All camera processing runs locally on your computer.
 | Half-heart (one half of a two-handed heart), held | Like the Short |
 | Open palm, held | Pause / resume |
 
-Safe control modes (*Tracking only*, *Gesture test*, *Live control*), an emergency stop
+Safe control modes (*Gestures off*, *Gesture test*, *Live control*), an emergency stop
 (button, Esc, **Ctrl+Alt+D** anywhere), sensitivity presets, per-gesture on/off and mapping.
 **Practice** explains after every try why a gesture was or was not recognized; **Quick
 Calibration** ([guide](docs/guides/CALIBRATION_GUIDE.md)) adapts it to your movements;
@@ -30,7 +30,7 @@ Every action is confirmed from the page and reported as succeeded, no change, re
 or unknown.
 
 **Three UI modes**: *Developer Mode* (dashboard with skeleton, vectors, diagnostics, history,
-reports), *Content Creator Mode* (compact always-on-top overlay for OBS, optional
+reports), *Broadcast Mode* (compact always-on-top overlay for OBS, optional
 **transparent background**), *Background Mode* (tray icon that always shows the camera and
 control state).
 
@@ -71,7 +71,7 @@ after that everything works offline. A packaged build is described in
 
 1. **Start camera**, choose **Gesture test**, practise the gestures (nothing is executed).
 2. Open a YouTube Shorts tab, choose **Live control**.
-3. Optional: *Creator overlay*, *To tray*, *Today* tab (reports, limits, Wrapped, face
+3. Optional: *Broadcast Mode*, *To tray*, *Today* tab (reports, limits, Wrapped, face
    effects), *Co-op* tab.
 
 A step-by-step guide with every feature is the

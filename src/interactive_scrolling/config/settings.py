@@ -336,6 +336,8 @@ class AppearanceSettings:
     """The confirmed-gesture banner and candidate progress bar on the video."""
     show_telemetry: bool = True
     """Status chips (tracking state, resolution) on the video."""
+    getting_started_done: bool = False
+    """The first-use guide was closed with "Don't show this at start"."""
 
     def __post_init__(self) -> None:
         if not _valid_color(self.skeleton_color):

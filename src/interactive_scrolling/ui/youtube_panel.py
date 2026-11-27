@@ -55,13 +55,18 @@ class YouTubePanel(Card):
         self.add_widget(row)
         setup = QLabel(
             f"One-time setup: open edge://extensions (or chrome://extensions), enable "
-            f"Developer mode, choose <b>Load unpacked</b> and select"
-            f"<br><code>{EXTENSION_DIR}</code>"
-            f"<br>Then click the extension icon, paste the pairing code and keep port {port}."
+            f"Developer mode, choose <b>Load unpacked</b> and select the folder "
+            f"<b>{EXTENSION_DIR.name}</b> (copy its full path below). Then click the extension "
+            f"icon, paste the pairing code and keep port {port}. After an update, press "
+            f"<b>Reload</b> on the extension in the same page."
         )
         setup.setWordWrap(True)
         setup.setObjectName("rowKey")
         self.add_widget(setup)
+        folder = QPushButton("Copy extension folder path")
+        folder.setToolTip(str(EXTENSION_DIR))
+        folder.clicked.connect(lambda: QGuiApplication.clipboard().setText(str(EXTENSION_DIR)))
+        self.add_widget(folder)
 
     def show_status(self, status: YouTubeStatus | None) -> None:
         if status is None:
