@@ -75,6 +75,25 @@ def main() -> int:
         default=ControlMode.GESTURE_TEST.value,
         help="control mode during the session (live control is never enabled by this script)",
     )
+    parser.add_argument(
+        "--ui-mode",
+        choices=["developer", "creator", "background"],
+        default="developer",
+        help="presentation mode for the session (Brief 007)",
+    )
+    parser.add_argument(
+        "--cycle-modes",
+        type=float,
+        default=0.0,
+        help="seconds between presentation-mode changes (developer -> creator -> background); "
+        "invariants are checked every second",
+    )
+    parser.add_argument(
+        "--optional-models",
+        action="store_true",
+        help="load the person-segmentation and face-landmark models and enable eye analytics",
+    )
+    parser.add_argument("--transparent", action="store_true", help="transparent Broadcast overlay")
     args = parser.parse_args()
     mode = ControlMode(args.mode)
 
@@ -93,11 +112,32 @@ def main() -> int:
         port = probe.getsockname()[1]
     SettingsStore(data_dir / "settings.json").save(UserSettings(bridge_port=port))
     services = build_services(data_dir)
+    extra: dict = {}
+    if args.optional_models:
+        from interactive_scrolling.vision.face_tracker import MediaPipeFaceTracker
+        from interactive_scrolling.vision.model_assets import FACE_MODEL, SEGMENTER_MODEL
+        from interactive_scrolling.vision.segmenter import MediaPipePersonSegmenter
+
+        extra = {
+            "segmenter_factory": lambda: MediaPipePersonSegmenter(SEGMENTER_MODEL.path()),
+            "face_factory": lambda: MediaPipeFaceTracker(FACE_MODEL.path()),
+        }
+        from dataclasses import replace as _replace
+
+        effects = _replace(services.user_settings.effects, eye_analytics_enabled=True)
+        services.update_settings(effects=effects)
+    if args.transparent:
+        from dataclasses import replace as _replace
+
+        services.update_settings(
+            creator=_replace(services.user_settings.creator, transparent_background=True)
+        )
     window = MainWindow(
         settings,
         camera_factory=OpenCVCamera,
         tracker_factory=lambda: MediaPipeHandTracker(settings.tracking, model),
         services=services,
+        **extra,
     )
     probe = EventProbe()
     probe.attach(app)
@@ -117,7 +157,30 @@ def main() -> int:
         "last_restart": time.perf_counter(),
         "tick": 0,
         "restart_pending": None,
+        "last_cycle": time.perf_counter(),
+        "cycle_index": 0,
     }
+    transitions: list[dict] = []
+    violations: list[str] = []
+    cycle = ("developer", "creator", "background")
+
+    def check_invariants(elapsed: float) -> None:
+        if window.services.dispatcher.mode is not mode:
+            violations.append(
+                f"{elapsed:.0f}s control mode changed to {window.services.dispatcher.mode}"
+            )
+        workers = [t.name for t in threading.enumerate() if t.is_alive()]
+        for name in ("camera-capture", "vision-processing"):
+            n = sum(1 for w in workers if w.startswith(name))
+            if n > 1:
+                violations.append(f"{elapsed:.0f}s {n} {name} threads")
+        seg = window.segmenter
+        if seg is not None:
+            should = window.creator.isVisible() and window.creator.settings.transparent_background
+            if seg.enabled != should:
+                violations.append(
+                    f"{elapsed:.0f}s segmentation enabled={seg.enabled}, expected {should}"
+                )
 
     def heartbeat() -> None:
         now = time.perf_counter()
@@ -184,7 +247,22 @@ def main() -> int:
             }
             window.stop_camera()
 
-        if state["tick"] % 30 == 0:
+        if args.cycle_modes and time.perf_counter() - state["last_cycle"] >= args.cycle_modes:
+            state["last_cycle"] = time.perf_counter()
+            state["cycle_index"] += 1
+            target = cycle[state["cycle_index"] % len(cycle)]
+            t_switch = time.perf_counter()
+            window.set_ui_mode(target)
+            transitions.append(
+                {
+                    "at_s": round(elapsed, 1),
+                    "to": target,
+                    "ms": round((time.perf_counter() - t_switch) * 1000, 1),
+                }
+            )
+        if state["tick"] > 3:
+            check_invariants(elapsed)
+        if state["tick"] % 30 == 0 and window.isVisible():
             window.resize(*SIZES[(state["tick"] // 30) % len(SIZES)])
         if state["tick"] % 45 == 0:
             window.overlay_panel.mirror.toggle()
@@ -224,6 +302,8 @@ def main() -> int:
     sampler.start()
     QTimer.singleShot(500, window.start_camera)
     QTimer.singleShot(600, lambda: window.set_control_mode(mode))
+    if args.ui_mode != "developer":
+        QTimer.singleShot(1500, lambda: window.set_ui_mode(args.ui_mode))
     app.exec()
 
     running = [s for s in samples if s["camera"] == "running" and s["processing_fps"] > 0]
@@ -243,6 +323,12 @@ def main() -> int:
             "latency_ms": summarize([s["latency_ms"] for s in running if s["latency_ms"]]),
             "inference_ms": summarize([s["inference_ms"] for s in running if s["inference_ms"]]),
             "control_mode": mode.value,
+            "ui_mode": args.ui_mode,
+            "optional_models": args.optional_models,
+            "transparent": args.transparent,
+            "mode_transitions": len(transitions),
+            "mode_transition_ms": summarize([t["ms"] for t in transitions]),
+            "invariant_violations": violations[:50],
             "gesture_ms": summarize([s["gesture_ms"] for s in running if s["gesture_ms"]]),
             "gestures_recognized": window.history.rowCount(),
             "cpu_percent_of_machine": summarize([s["cpu_percent_machine"] for s in samples]),
