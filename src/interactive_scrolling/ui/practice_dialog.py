@@ -334,7 +334,8 @@ class PracticeDialog(QDialog):
 
     def _show_prompt(self) -> None:
         gesture, detector = self.current
-        title, text = instruction(gesture, detector)
+        shown = "any" if self.mode == "practice" and self._own_style() == "motion" else detector
+        title, text = instruction(gesture, shown)
         self.successes = 0
         self.guide.set_gesture(gesture)
         what = "Practice" if self.mode == "practice" else "Quick Calibration"
@@ -459,6 +460,10 @@ class PracticeDialog(QDialog):
         progress = [c.progress for c in gestures.candidates if c.gesture is target]
         self.progress.setValue(int(100 * (progress[0] if progress else 0)))
 
+    def _own_style(self) -> str:
+        """The user's own swipe style (not the temporary one of a whole-hand practice)."""
+        return (self._restore_settings or self.services.engine.settings).control_style
+
     def _matches(self, record: ActionRecord) -> bool:
         gesture, detector = self.current
         if record.event.gesture is not gesture:
@@ -493,7 +498,8 @@ class PracticeDialog(QDialog):
                     self.result.setText(f"\u2713 Recognized: {label}")
                     self.result.setStyleSheet(f"color: {palette.ACCENT_GREEN};")
                 elif record.status.final:
-                    self.result.setText(f"That was {label}. {instruction(target, detector)[0]}.")
+                    shown = "any" if self._own_style() == "motion" else detector
+                    self.result.setText(f"That was {label}. {instruction(target, shown)[0]}.")
                     self.result.setStyleSheet(f"color: {palette.ACCENT_AMBER};")
             self._show_latest_rejection(target)
             self._update_counter()

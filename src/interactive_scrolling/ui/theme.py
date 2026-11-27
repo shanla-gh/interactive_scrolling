@@ -122,7 +122,7 @@ QLabel#chip[state="ok"] {{ color: {p.ACCENT_GREEN}; border-color: #1f6b47; }}
 QLabel#chip[state="warn"] {{ color: {p.ACCENT_AMBER}; }}
 QTabWidget#sideTabs::pane {{ border: none; }}
 QTabBar::tab {{
-    background: {p.SURFACE}; color: {p.TEXT_MUTED}; padding: 6px 12px; margin-right: 2px;
+    background: {p.SURFACE}; color: {p.TEXT_MUTED}; padding: 6px 9px; margin-right: 2px;
     border: 1px solid {p.BORDER}; border-bottom: none;
     border-top-left-radius: 6px; border-top-right-radius: 6px;
 }}

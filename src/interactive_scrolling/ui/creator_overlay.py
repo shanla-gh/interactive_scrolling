@@ -1,4 +1,4 @@
-"""Content Creator Mode: a compact, always-on-top, frameless camera overlay for OBS.
+"""Broadcast Mode: a compact, always-on-top, frameless camera overlay for OBS.
 
 The overlay is a *view* of the shared runtime: it receives the frames the main window already
 gets from the one pipeline and never owns a camera, model or dispatcher. It does not take the
@@ -6,7 +6,12 @@ keyboard focus (``WindowDoesNotAcceptFocus``, ``WA_ShowWithoutActivating`` and, 
 ``WS_EX_NOACTIVATE``), so clicking or dragging it leaves the browser the active window.
 
 Interaction: drag anywhere to move, drag the bottom-right corner to resize (16:9 kept),
-right-click for layers, transparency, opacity and modes, double-click for Developer Mode.
+right-click for layers, transparency, opacity, position and modes, double-click for Developer
+Mode. A saved position that is no longer on any screen (a monitor was removed, the scaling
+changed) is replaced by the bottom-right corner of the primary screen.
+
+Display smoothing: the drawn skeleton is smoothed for presentation only
+(``visualization.smoothing``); recognition and the Developer view use the raw landmarks.
 
 Transparent background: when enabled the camera copy drawn here gets a person mask as its alpha
 channel (see ``visualization.compositing``). If no fresh mask is available the camera image is
@@ -36,7 +41,12 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
-from interactive_scrolling.actions.types import ActionRecord, ActionStatus, ActionType
+from interactive_scrolling.actions.types import (
+    ActionRecord,
+    ActionStatus,
+    ActionType,
+    ControlMode,
+)
 from interactive_scrolling.config.settings import (
     AppearanceSettings,
     CreatorSettings,
@@ -52,8 +62,16 @@ from interactive_scrolling.vision.compositing import MaskCompositor
 from interactive_scrolling.visualization import palette
 from interactive_scrolling.visualization.geometry import ViewTransform
 from interactive_scrolling.visualization.overlay import OverlayRenderer
+from interactive_scrolling.visualization.smoothing import LandmarkSmoother
 
 ExtraPainter = Callable[[QPainter, ViewTransform, ProcessedFrame], None]
+CONTROL_CHIP = {
+    ControlMode.TRACKING_ONLY: ("GESTURES OFF", palette.TEXT_MUTED),
+    ControlMode.GESTURE_TEST: ("GESTURE TEST", palette.ACCENT_CYAN),
+    ControlMode.LIVE_CONTROL: ("\u25cf LIVE CONTROL", palette.ACCENT_RED),
+}
+MIN_VISIBLE_SHARE = 0.25
+"""A saved position is used only if at least this share of the overlay is on some screen."""
 
 GRIP_PX = 18
 FEEDBACK_S = 2.5
@@ -96,7 +114,7 @@ class CreatorOverlay(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Interactive Scrolling - Creator overlay")
+        self.setWindowTitle("Interactive Scrolling - Broadcast Mode")
         self.setWindowFlags(
             Qt.WindowType.Tool
             | Qt.WindowType.FramelessWindowHint
@@ -112,6 +130,9 @@ class CreatorOverlay(QWidget):
         self.renderer.set_style(appearance)
         self.segmenter = segmenter
         self.compositor = MaskCompositor()
+        self.smoother = LandmarkSmoother()
+        self._drawn_tracking = None
+        self.control_mode = ControlMode.TRACKING_ONLY
         self.extra_painters: list[ExtraPainter] = []
         self.mirrored = True
         self.counters_text: str = ""
@@ -143,12 +164,32 @@ class CreatorOverlay(QWidget):
         self.renderer.set_style(appearance)
         self.update()
 
+    def set_control_mode(self, mode: ControlMode) -> None:
+        self.control_mode = mode
+        self.update()
+
+    @staticmethod
+    def visible_share(rect: QRect) -> float:
+        """Share of ``rect`` that lies on any screen's available area."""
+        area = max(1, rect.width() * rect.height())
+        covered = 0
+        for screen in QApplication.screens():
+            part = rect.intersected(screen.availableGeometry())
+            if not part.isEmpty():
+                covered += part.width() * part.height()
+        return min(1.0, covered / area)
+
     def _place(self) -> None:
         s = self.settings
         if s.corner is OverlayCorner.CUSTOM and s.x is not None and s.y is not None:
-            self.move(s.x, s.y)
-            return
-        screen = QApplication.primaryScreen()
+            if self.visible_share(QRect(s.x, s.y, s.width, s.height)) >= MIN_VISIBLE_SHARE:
+                self.move(s.x, s.y)
+                return
+            # Off-screen (monitor removed, scaling changed): back to a visible corner.
+            self.settings = replace(s, corner=OverlayCorner.BOTTOM_RIGHT, x=None, y=None)
+            s = self.settings
+        screen = self.screen() if self.isVisible() else None
+        screen = screen or QApplication.primaryScreen()
         if screen is None:
             return
         area = screen.availableGeometry()
@@ -185,11 +226,17 @@ class CreatorOverlay(QWidget):
 
     def show_frame(self, frame: ProcessedFrame) -> None:
         self._frame = frame
+        # Smoothed once per camera frame (repaints for fading feedback reuse it).
+        self._drawn_tracking = (
+            self.smoother.smooth(frame.tracking) if self.settings.smooth_skeleton else None
+        )
         self.update()
 
     def clear(self) -> None:
         self._frame = None
         self._image = None
+        self._drawn_tracking = None
+        self.smoother.reset()
         self.compositor.reset()
         self.update()
 
@@ -268,7 +315,9 @@ class CreatorOverlay(QWidget):
             ("show_vectors", "Motion vectors"),
             ("show_last_gesture", "Last gesture"),
             ("show_outcome", "Action outcome"),
-            ("show_counters", "Today's counters"),
+            ("show_counters", "Session timer and counters"),
+            ("show_control_state", "Gesture control status"),
+            ("smooth_skeleton", "Smooth skeleton (display only)"),
             ("transparent_background", "Transparent background"),
         ):
             action = QAction(label, menu, checkable=True)
@@ -288,6 +337,16 @@ class CreatorOverlay(QWidget):
             action = QAction(f"{width} x {width * 9 // 16}", size)
             action.triggered.connect(lambda _=False, w=width: self._set_size(w))
             size.addAction(action)
+        position = menu.addMenu("Position")
+        for corner, label in (
+            (OverlayCorner.TOP_LEFT, "Top left"),
+            (OverlayCorner.TOP_RIGHT, "Top right"),
+            (OverlayCorner.BOTTOM_LEFT, "Bottom left"),
+            (OverlayCorner.BOTTOM_RIGHT, "Bottom right (default)"),
+        ):
+            action = QAction(label, position)
+            action.triggered.connect(lambda _=False, c=corner: self.move_to_corner(c))
+            position.addAction(action)
         menu.addSeparator()
         menu.addAction("Developer Mode", self.developer_requested.emit)
         menu.addAction("Background Mode (tray)", self.background_requested.emit)
@@ -302,6 +361,11 @@ class CreatorOverlay(QWidget):
     def _set_opacity(self, value: float) -> None:
         self._emit_settings(opacity=value)
         self.apply_settings(self.settings)
+
+    def move_to_corner(self, corner: OverlayCorner) -> None:
+        """Corner of the screen the overlay is on (or the primary screen)."""
+        self._emit_settings(corner=corner, x=None, y=None)
+        self.apply_settings(self.settings, reposition=True)
 
     def _set_size(self, width: int) -> None:
         self._emit_settings(width=width, height=width * 9 // 16)
@@ -358,12 +422,15 @@ class CreatorOverlay(QWidget):
             else:
                 painter.drawImage(target, image)
             painter.restore()
-        self.renderer.paint(painter, t, frame.tracking, frame.motion, self.overlay_layers())
+        tracking = self._drawn_tracking if self._drawn_tracking is not None else frame.tracking
+        self.renderer.paint(painter, t, tracking, frame.motion, self.overlay_layers())
         for paint_extra in self.extra_painters:
             paint_extra(painter, t, frame)
         if self.settings.transparent_background and image is None:
             self._paint_notice(painter, "Background removal unavailable - camera image hidden")
         self._paint_feedback(painter, target)
+        if self.settings.show_control_state:
+            self._paint_control_state(painter, target)
         self._paint_grip(painter)
         painter.end()
 
@@ -408,6 +475,24 @@ class CreatorOverlay(QWidget):
             painter.setPen(QColor(color))
             painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
             y = box.top() - 4
+
+    def _paint_control_state(self, painter: QPainter, rect: QRectF) -> None:
+        text, color = CONTROL_CHIP[self.control_mode]
+        painter.setFont(self._font)
+        metrics = painter.fontMetrics()
+        box = QRectF(
+            rect.left() + 10,
+            rect.top() + 10,
+            metrics.horizontalAdvance(text) + 16,
+            metrics.height() + 6,
+        )
+        background = QColor(palette.BACKGROUND)
+        background.setAlpha(170)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(background)
+        painter.drawRoundedRect(box, 5, 5)
+        painter.setPen(QColor(color))
+        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
 
     def _paint_grip(self, painter: QPainter) -> None:
         painter.setPen(QPen(QColor(255, 255, 255, 110), 1.5))

@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from interactive_scrolling.actions.types import ControlMode
 
 MODE_TIPS = {
-    ControlMode.TRACKING_ONLY: "Camera and hand tracking only. Gestures are not recognized.",
+    ControlMode.TRACKING_ONLY: "The camera shows your hand; gestures are not recognized.",
     ControlMode.GESTURE_TEST: "Gestures are recognized and shown. Nothing is sent to the browser.",
     ControlMode.LIVE_CONTROL: "Confirmed gestures control YouTube Shorts and browser tabs.",
 }
+
+
+def reserve_bold_width(button: QPushButton) -> None:
+    """A checked mode button is drawn bold; reserve that width so its text is never clipped
+    (Brief 007: "Tracking only" was clipped at 125 % display scaling)."""
+    font = QFont(button.font())
+    font.setBold(True)
+    text = QFontMetrics(font).horizontalAdvance(button.text())
+    button.setMinimumWidth(text + 34)
 
 
 class ControlBar(QFrame):
@@ -24,7 +34,7 @@ class ControlBar(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 8, 20, 8)
         layout.setSpacing(8)
-        label = QLabel("CONTROL")
+        label = QLabel("GESTURES")
         label.setObjectName("cardTitle")
         layout.addWidget(label)
         self.group = QButtonGroup(self)
@@ -37,10 +47,11 @@ class ControlBar(QFrame):
             button.setProperty("mode", mode.value)
             button.setToolTip(MODE_TIPS[mode])
             button.clicked.connect(lambda _=False, m=mode: self.mode_requested.emit(m))
+            reserve_bold_width(button)
             self.group.addButton(button)
             self.buttons[mode] = button
             layout.addWidget(button)
-        self.disable_button = QPushButton("■  Disable control")
+        self.disable_button = QPushButton("■  Stop control")
         self.disable_button.setObjectName("disableButton")
         self.disable_button.clicked.connect(self.disable_requested)
         layout.addWidget(self.disable_button)
@@ -65,7 +76,7 @@ class ControlBar(QFrame):
         tip = "Immediately stop all gesture control."
         if text:
             tip += f" Global shortcut: {text}."
-            self.disable_button.setText(f"■  Disable  ({text})")
+            self.disable_button.setText(f"■  Stop  ({text})")
         self.disable_button.setToolTip(tip)
 
     def set_youtube(self, text: str, ready: bool) -> None:

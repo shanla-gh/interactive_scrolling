@@ -99,6 +99,16 @@ class SceneCamera:
         self.opened = False
 
 
+def _failing_camera(settings: CameraSettings):  # type: ignore[no-untyped-def]
+    from interactive_scrolling.vision.camera import CameraOpenError
+
+    class Unavailable(SceneCamera):
+        def open(self) -> None:
+            raise CameraOpenError("Could not open camera 0 (it may be in use by another app).")
+
+    return Unavailable(settings)
+
+
 class ScriptedHand:
     """A pointing hand at the right side that rests and swipes up every 3 s."""
 
@@ -199,7 +209,6 @@ def main() -> int:
         save(window, out, "02_live_control_no_browser")
     window.set_control_mode(ControlMode.TRACKING_ONLY)
 
-    from interactive_scrolling.ui.practice_dialog import PracticeDialog
     from interactive_scrolling.ui.settings_dialog import GestureSettingsDialog
 
     dialog = GestureSettingsDialog(services.engine.settings, services.dispatcher.mapping, window)
@@ -208,13 +217,13 @@ def main() -> int:
     if want("03_gesture_settings"):
         save(dialog, out, "03_gesture_settings")
     dialog.close()
-    practice = PracticeDialog(services, window)
-    practice.show()
+    window.open_practice()
+    practice = window.practice_dialog
     pump(app, 0.5)
     if want("04_practice_start"):
         save(practice, out, "04_practice_start")
     practice.start("practice")
-    pump(app, 1.5)
+    pump(app, 2.0)
     if want("05_practice_running"):
         save(practice, out, "05_practice_running")
     practice.close()
@@ -247,6 +256,11 @@ def main() -> int:
     tray_menu.close()
     window.stop_camera()
     pump(app, 1.0)
+    if want("10_camera_unavailable"):
+        window.pipeline._camera_factory = _failing_camera
+        window.start_camera()
+        pump(app, 1.5)
+        save(window, out, "10_camera_unavailable")
     window.close()
     pump(app, 0.5)
     screen = QGuiApplication.primaryScreen()

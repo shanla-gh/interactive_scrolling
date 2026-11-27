@@ -112,6 +112,15 @@ class _ControlSignals(QObject):
     notice = Signal(object)
 
 
+def broadcast_counters(session_s: float, report) -> str:  # type: ignore[no-untyped-def]
+    """Session timer and today's executed actions for the Broadcast overlay."""
+    minutes, seconds = divmod(int(max(0.0, session_s)), 60)
+    text = f"Session {minutes}:{seconds:02d}"
+    if report is not None:
+        text += f"  ·  {sum(report.succeeded.values())} actions today"
+    return text
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -246,6 +255,7 @@ class MainWindow(QMainWindow):
         self._control_signals.mode.connect(self._on_mode_changed, queued)
         self.services.dispatcher.add_record_listener(self._control_signals.record.emit)
         self.services.dispatcher.add_mode_listener(self._control_signals.mode.emit)
+        self.creator.set_control_mode(self.services.dispatcher.mode)
         self.control_bar.mode_requested.connect(self.set_control_mode)
         self.control_bar.disable_requested.connect(self.emergency_disable)
         self.gesture_panel.settings_requested.connect(self.open_gesture_settings)
@@ -364,9 +374,10 @@ class MainWindow(QMainWindow):
             self.resolution_combo.setCurrentIndex(SUPPORTED_RESOLUTIONS.index(current))
         layout.addWidget(self.resolution_combo)
 
-        self.creator_button = QPushButton("Creator overlay")
+        self.creator_button = QPushButton("Broadcast Mode")
         self.creator_button.setToolTip(
-            "Compact always-on-top camera overlay for streaming and recording (OBS)"
+            "A small always-on-top camera window over the browser, for recording and streaming "
+            "(OBS). Does not change gesture control."
         )
         self.creator_button.clicked.connect(lambda: self.set_ui_mode("creator"))
         layout.addWidget(self.creator_button)
@@ -402,8 +413,18 @@ class MainWindow(QMainWindow):
             ("Today", [self.today_panel, self.visual_panel]),
             ("Browser", [self.youtube_panel]),
             ("Co-op", [self.coop_panel]),
-            ("Performance", [self.performance_panel, self.tracking_panel, self.motion_panel]),
-            ("View", [self.overlay_panel, self.appearance_button]),
+            # Display options and system figures share a tab so all tabs fit the 360 px
+            # side panel at 150 % scaling (Brief 007).
+            (
+                "System",
+                [
+                    self.overlay_panel,
+                    self.appearance_button,
+                    self.performance_panel,
+                    self.tracking_panel,
+                    self.motion_panel,
+                ],
+            ),
         ):
             self.side_tabs.addTab(self._scroll_page(panels), title)
         top_layout.addWidget(self.side_tabs)
@@ -462,7 +483,7 @@ class MainWindow(QMainWindow):
         bar.setObjectName("statusBar")
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(20, 6, 20, 6)
-        layout.setSpacing(22)
+        layout.setSpacing(16)
         self.capture_fps_label = QLabel()
         self.processing_fps_label = QLabel()
         self.display_fps_label = QLabel()
@@ -486,7 +507,8 @@ class MainWindow(QMainWindow):
             label.setToolTip(tip)
             layout.addWidget(label)
         layout.addStretch(1)
-        privacy = QLabel("● LOCAL PROCESSING · NO FRAMES LEAVE THIS DEVICE")
+        privacy = QLabel("● LOCAL PROCESSING")
+        privacy.setToolTip("All processing runs on this computer; no camera frames leave it.")
         privacy.setObjectName("privacyBadge")
         layout.addWidget(privacy)
         return bar
@@ -539,8 +561,8 @@ class MainWindow(QMainWindow):
         self.status_pill.setText(
             {
                 CameraState.STOPPED: "CAMERA OFF",
-                CameraState.STARTING: "STARTING",
-                CameraState.RUNNING: "● LIVE",
+                CameraState.STARTING: "CAMERA STARTING",
+                CameraState.RUNNING: "● CAMERA ON",
                 CameraState.STOPPING: "STOPPING",
                 CameraState.ERROR: "CAMERA ERROR",
             }[state]
@@ -620,6 +642,7 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, old: ControlMode, new: ControlMode, reason: str) -> None:
         self.pipeline.set_gestures_enabled(new is not ControlMode.TRACKING_ONLY)
         self.control_bar.set_mode(new)
+        self.creator.set_control_mode(new)
         self.tray.update_state(
             self._camera_state in (CameraState.RUNNING, CameraState.STARTING), new
         )
@@ -982,11 +1005,11 @@ class MainWindow(QMainWindow):
         status = controller.status() if controller is not None else None
         self.youtube_panel.show_status(status)
         if status is None:
-            self.control_bar.set_youtube("YouTube: not available", False)
+            self.control_bar.set_youtube("Browser: connection not available", False)
         elif status.ready:
-            self.control_bar.set_youtube(f"YouTube: ready ({status.target_browser})", True)
+            self.control_bar.set_youtube(f"Browser: Shorts ready ({status.target_browser})", True)
         else:
-            self.control_bar.set_youtube(f"YouTube: {status.reason}", False)
+            self.control_bar.set_youtube(f"Browser: {status.reason}", False)
         # Reports are computed on the services' activity thread; the UI only displays them.
         services = self.services
         analytics = services.analytics
@@ -1001,6 +1024,10 @@ class MainWindow(QMainWindow):
         )
         self.performance_panel.show_report(services.performance)
         self.coop_panel.show_status(services.coop_status())
+        if self.creator.isVisible():
+            self.creator.counters_text = broadcast_counters(
+                services.current_session_s(), services.report
+            )
         effects = services.user_settings.effects
         self.visual_panel.show_report(
             effects.eye_analytics_enabled,
@@ -1058,13 +1085,13 @@ class MainWindow(QMainWindow):
             return f"{value:.{digits}f} {unit}" if value is not None else "—"
 
         live = m.camera_state is CameraState.RUNNING
-        self.capture_fps_label.setText(f"CAPTURE {m.capture_fps:4.1f} FPS")
-        self.processing_fps_label.setText(f"PROCESSING {m.processing_fps:4.1f} FPS")
+        self.capture_fps_label.setText(f"CAM {m.capture_fps:4.1f} FPS")
+        self.processing_fps_label.setText(f"PROC {m.processing_fps:4.1f} FPS")
         display = self.video.display_rate.rate() if live else 0.0
-        self.display_fps_label.setText(f"DISPLAY {display:4.1f} FPS")
+        self.display_fps_label.setText(f"VIEW {display:4.1f} FPS")
         if live and m.latency_ms is not None:
             self.latency_label.setText(
-                f"LATENCY {fmt(m.latency_ms, 'ms')} / p95 {fmt(m.latency_p95_ms, 'ms')}"
+                f"LATENCY {fmt(m.latency_ms, 'ms')} (p95 {fmt(m.latency_p95_ms, 'ms', 0)})"
             )
         else:
             self.latency_label.setText("LATENCY —")

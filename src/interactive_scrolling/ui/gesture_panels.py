@@ -104,7 +104,7 @@ class GesturePanel(Card):
 
     def show_frame(self, frame: GestureFrame | None, enabled: bool) -> None:
         if not enabled:
-            self.status.setText("Recognition off (Tracking only)")
+            self.status.setText("Gestures off - choose Gesture test or Live control")
             for label in (self.pose, self.phase, self.candidate):
                 label.setText(NO_DATA)
             self.progress.setValue(0)

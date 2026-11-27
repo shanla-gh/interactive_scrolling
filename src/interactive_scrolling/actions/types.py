@@ -20,7 +20,7 @@ class ControlMode(enum.Enum):
     @property
     def label(self) -> str:
         return {
-            ControlMode.TRACKING_ONLY: "Tracking only",
+            ControlMode.TRACKING_ONLY: "Gestures off",
             ControlMode.GESTURE_TEST: "Gesture test",
             ControlMode.LIVE_CONTROL: "Live control",
         }[self]

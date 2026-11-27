@@ -61,7 +61,7 @@ def test_initial_state(qtbot) -> None:
 def test_live_frames_update_view_and_panels(qtbot) -> None:
     window = make_window(qtbot)
     start(qtbot, window)
-    assert window.status_pill.text() == "● LIVE"
+    assert window.status_pill.text() == "● CAMERA ON"
     assert window.start_button.text() == "Stop camera"
     assert not window.camera_combo.isEnabled() and not window.resolution_combo.isEnabled()
     qtbot.waitUntil(lambda: window.tracking_panel.hands.text() == "1", timeout=3000)

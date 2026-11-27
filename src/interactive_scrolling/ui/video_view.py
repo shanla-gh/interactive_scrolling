@@ -211,7 +211,7 @@ class VideoView(QWidget):
         )
         if motion.phase != "moving":
             text += f"  ({motion.phase})"
-        painter.drawText(QPointF(cx + 10, cy - 10), text)
+        painter.drawText(QPointF(cx + 12, cy + 22), text)
 
     def _paint_gesture_feedback(
         self, painter: QPainter, t: ViewTransform, frame: ProcessedFrame
@@ -241,7 +241,8 @@ class VideoView(QWidget):
         if gestures is not None and gestures.candidates:
             best = max(gestures.candidates, key=lambda c: c.progress)
             width = min(260.0, rect.width() * 0.4)
-            bar = QRectF(rect.center().x() - width / 2, rect.bottom() - 30, width, 6)
+            # Bottom right: clear of the camera chip (bottom left) and the state line.
+            bar = QRectF(rect.right() - width - 28, rect.bottom() - 30, width, 6)
             painter.setPen(Qt.PenStyle.NoPen)
             track = QColor(palette.BACKGROUND)
             track.setAlpha(180)
@@ -301,7 +302,7 @@ class VideoView(QWidget):
         self._paint_chip(
             painter,
             QPointF(rect.left() + 20, rect.bottom() - 20),
-            f"LIVE  {source}",
+            f"CAMERA  {source}",
             palette.TEXT_MUTED,
             anchor_bottom=True,
         )

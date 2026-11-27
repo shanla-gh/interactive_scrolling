@@ -37,7 +37,7 @@ from interactive_scrolling.gestures.types import GestureType
 TUNABLES = (
     (
         "swipe_min_distance_palms",
-        "Swipe distance (up/down)",
+        "Pointing swipe distance (up/down)",
         "palm lengths",
         0.3,
         3.0,
@@ -56,7 +56,7 @@ TUNABLES = (
     ),
     (
         "swipe_horizontal_distance_palms",
-        "Swipe distance (left/right)",
+        "Pointing distance left/right (0 = shared)",
         "palm lengths",
         0.0,
         3.0,
@@ -74,7 +74,7 @@ TUNABLES = (
     ),
     (
         "swipe_up_distance_palms",
-        "Distance finger up",
+        "Pointing distance up (0 = shared)",
         "palm lengths",
         0.0,
         3.0,
@@ -83,7 +83,7 @@ TUNABLES = (
     ),
     (
         "swipe_down_distance_palms",
-        "Distance finger down",
+        "Pointing distance down (0 = shared)",
         "palm lengths",
         0.0,
         3.0,
@@ -135,10 +135,10 @@ CONTROL_STYLE_LABELS = (
     ("finger", "Pointing finger only (fewer accidental triggers)"),
 )
 ENABLES = (
-    ("enable_swipe_up", "Move finger up"),
-    ("enable_swipe_down", "Move finger down"),
-    ("enable_swipe_right", "Move finger to your right"),
-    ("enable_swipe_left", "Move finger to your left"),
+    ("enable_swipe_up", "Move hand up"),
+    ("enable_swipe_down", "Move hand down"),
+    ("enable_swipe_right", "Move hand to your right"),
+    ("enable_swipe_left", "Move hand to your left"),
     ("enable_half_heart", "Half-heart"),
     ("enable_stop", "Open palm (stop)"),
 )
@@ -208,9 +208,29 @@ class GestureSettingsDialog(QDialog):
             "while you move your hands for other reasons."
         )
         top.addRow("Swipe with", self.style)
+        style_note = QLabel(
+            "Any hand shape is more natural but triggers more often by accident (measured: about "
+            "twice as often while using the hands for other things) - choose Pointing finger "
+            "only if that happens."
+        )
+        style_note.setWordWrap(True)
+        style_note.setObjectName("rowKey")
+        top.addRow(style_note)
         root.addLayout(top)
 
-        tune_box = QGroupBox("Thresholds")
+        # Brief 007: raw thresholds are for developers and calibration checks; ordinary use
+        # needs only the sensitivity preset. Collapsed by default so the dialog fits a laptop
+        # screen at 150 % scaling.
+        self.advanced = QCheckBox("Show advanced thresholds")
+        self.advanced.setToolTip(
+            "Distances and times the recognizer uses (hand lengths, seconds). Changing them sets "
+            "the sensitivity to Custom; Restore Defaults undoes it."
+        )
+        root.addWidget(self.advanced)
+        tune_box = QGroupBox("Advanced thresholds")
+        self.tune_box = tune_box
+        tune_box.setVisible(False)
+        self.advanced.toggled.connect(self._show_advanced)
         tune = QFormLayout(tune_box)
         self.spins: dict[str, QDoubleSpinBox] = {}
         for name, label, unit, low, high, step, tip in TUNABLES:
@@ -267,6 +287,10 @@ class GestureSettingsDialog(QDialog):
         row.addWidget(buttons)
         root.addLayout(row)
         self.load(settings, mapping)
+
+    def _show_advanced(self, on: bool) -> None:
+        self.tune_box.setVisible(on)
+        self.adjustSize()
 
     # ------------------------------------------------------------------ state
 

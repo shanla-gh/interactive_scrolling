@@ -383,6 +383,11 @@ class CreatorSettings:
     show_counters: bool = False
     transparent_background: bool = False
     """Remove the background around the person (local segmentation, presentation only)."""
+    show_control_state: bool = True
+    """A small chip with the gesture-control state (off / test / live control), so the overlay
+    never leaves it unclear whether gestures act on the browser (Brief 007)."""
+    smooth_skeleton: bool = True
+    """Display-only One Euro smoothing of the drawn landmarks (recognition is unaffected)."""
 
     def __post_init__(self) -> None:
         if not (160 <= self.width <= 3840 and 90 <= self.height <= 2160):

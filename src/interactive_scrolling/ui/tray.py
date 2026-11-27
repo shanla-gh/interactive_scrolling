@@ -55,17 +55,17 @@ class TrayController(QObject):
         self.menu = QMenu()
         self.camera_status = QAction("Camera: off", self.menu)
         self.camera_status.setEnabled(False)
-        self.control_status = QAction("Control: Tracking only", self.menu)
+        self.control_status = QAction("Gestures: off", self.menu)
         self.control_status.setEnabled(False)
         self.menu.addAction(self.camera_status)
         self.menu.addAction(self.control_status)
         self.menu.addSeparator()
         self.camera_action = self.menu.addAction("Start camera", self._toggle_camera)
-        disable_text = "Disable control" + (f"  ({hotkey_label})" if hotkey_label else "")
+        disable_text = "Stop gesture control" + (f"  ({hotkey_label})" if hotkey_label else "")
         self.disable_action = self.menu.addAction(disable_text, self.disable_control.emit)
         self.menu.addSeparator()
         self.menu.addAction("Developer Mode", lambda: self.mode_requested.emit("developer"))
-        self.menu.addAction("Content Creator overlay", lambda: self.mode_requested.emit("creator"))
+        self.menu.addAction("Broadcast Mode", lambda: self.mode_requested.emit("creator"))
         self.menu.addAction("Background Mode", lambda: self.mode_requested.emit("background"))
         self.menu.addSeparator()
         self.menu.addAction("Quit Interactive Scrolling", self.quit_requested.emit)
@@ -84,13 +84,13 @@ class TrayController(QObject):
     def update_state(self, camera_on: bool, mode: ControlMode) -> None:
         self._camera_on = camera_on
         self.camera_status.setText(f"Camera: {'ON' if camera_on else 'off'}")
-        self.control_status.setText(f"Control: {mode.label}")
+        self.control_status.setText(f"Gestures: {mode.label}")
         self.camera_action.setText("Stop camera" if camera_on else "Start camera")
         self.disable_action.setEnabled(mode is not ControlMode.TRACKING_ONLY)
         color = STATE_COLORS[mode] if camera_on else STATE_COLORS["off"]
         self.icon.setIcon(state_icon(color, camera_on))
         self.icon.setToolTip(
-            f"Interactive Scrolling - camera {'ON' if camera_on else 'off'}, {mode.label}"
+            f"Interactive Scrolling - camera {'on' if camera_on else 'off'}, {mode.label}"
         )
 
     def notify(self, title: str, text: str) -> None:

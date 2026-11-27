@@ -203,7 +203,7 @@ class ActionDispatcher:
                 record, ActionStatus.NOT_EXECUTED, "action not available in this version"
             )
         if self._controller is None:
-            return self._finish(record, ActionStatus.REJECTED, "no controller available")
+            return self._finish(record, ActionStatus.REJECTED, "browser connection not available")
         for check in list(self._admission):
             try:
                 refusal = check(record)
