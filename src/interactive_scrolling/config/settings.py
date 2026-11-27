@@ -467,6 +467,8 @@ class CalibrationProfile:
 
     created: str = ""
     hand: str = ""
+    method: int = 0
+    """Derivation version: 0 = version 0.4 (could raise thresholds too far), 2 = version 0.5."""
     heart_index_flexion: float | None = None
     heart_index_reach: float | None = None
     heart_hook: float | None = None

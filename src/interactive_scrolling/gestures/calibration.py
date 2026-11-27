@@ -23,8 +23,12 @@ Derivation (per axis, bounded)
     small ones would otherwise fail: measured 0/8). Movements far larger than the typical
     demonstration (raising the hand into position) are not counted. If wind-ups and
     demonstrations overlap, the smallest demonstration wins and the user is told to make the
-    swipe a little larger than the movement before it. Speed = 0.5 x the slowest
-    demonstration's peak within [1.2, 2.5]; the maximum duration may only grow (up to 1.0 s).
+    swipe a little larger than the movement before it. A raise is limited to 15 %. Speed =
+    0.5 x the slowest demonstration's peak, at least 1.2 and never above the current value; the
+    maximum duration may only grow (up to 1.0 s). Every opposite stroke between two
+    demonstrations is a return (however long the pause); only one right before the first
+    demonstration can be a wind-up (version 0.4 also counted slow returns as wind-ups and
+    raised the Director's distance to 1.34).
     The half-heart template is the median of the shape measurements of the held
     demonstrations (``pose.matches_personal_heart``); the stop pose's tilt tolerance may only
     grow (up to 70 degrees).
@@ -76,6 +80,9 @@ MIN_DISTANCE = 0.5
 MAX_DISTANCE = 1.4
 MIN_HOLD_S = 0.4
 OUTLIER_FACTOR = 2.5
+CALIBRATION_METHOD = 2
+MAX_RAISE = 1.15
+"""Calibration may raise a distance by at most 15 % (only when wind-ups require it)."""
 WINDUP_OUTLIER_FACTOR = 1.5
 AXES = {
     "vertical": (G.INDEX_SWIPE_UP, G.INDEX_SWIPE_DOWN),
@@ -415,17 +422,20 @@ def _classify(result: PromptResult, strokes: list[Stroke], holds: list[HeldPose]
     ]
     result.demos = demos
     gap_w = int(WINDUP_GAP_S * NS_PER_S)
-    gap_r = int(RETURN_GAP_S * NS_PER_S)
+    first_demo = min((d.start_ns for d in demos), default=None)
     for s in strokes:
         if s in demos:
             continue
         if s.direction is opposite:
-            after_demo = any(0 <= s.start_ns - d.end_ns <= gap_r for d in demos)
-            before_demo = any(0 <= d.start_ns - s.end_ns <= gap_w for d in demos)
-            if before_demo and not after_demo:
-                result.windups.append(s)
+            # Between two demonstrations the hand must come back: every opposite stroke there
+            # is a return, however long the user paused (a held swipe followed by a slow return
+            # was taken for a wind-up and raised the distance - Director, Brief 004 beta).
+            # Only a stroke right before the first demonstration can be a wind-up.
+            after_a_demo = any(s.start_ns >= d.end_ns for d in demos)
+            if after_a_demo:
                 continue
-            if after_demo:
+            if first_demo is not None and 0 <= first_demo - s.end_ns <= gap_w:
+                result.windups.append(s)
                 continue
         result.other.append(s)
 
@@ -464,8 +474,8 @@ def derive(
             else base.swipe_horizontal_distance_palms
         )
         distance = min(0.7 * statistics.median(lengths), current)
-        ceiling = 0.9 * min(lengths)
-        floor = 1.15 * max((s.length_palms for s in windups), default=0.0)
+        ceiling = min(0.9 * min(lengths), MAX_RAISE * current)
+        floor = min(1.15 * max((s.length_palms for s in windups), default=0.0), ceiling)
         if floor > ceiling:
             notes.append(
                 f"{axis.capitalize()} swipes: the movement before your swipe is about as large "
@@ -492,7 +502,9 @@ def derive(
     if values:
         vertical = values.get("vertical", base.swipe_min_distance_palms)
         horizontal = values.get("horizontal", 0.0)
-        speed = round(min(max(0.5 * min(peaks), 1.2), 2.5), 2)
+        # The speed is only ever lowered (fast demonstrations must not make slower everyday
+        # swipes fail).
+        speed = round(min(max(0.5 * min(peaks), 1.2), base.swipe_min_speed_palms_s), 2)
         duration = round(min(max(1.3 * max(durations), base.swipe_max_duration_s), 1.0), 2)
         settings = replace(
             settings,
@@ -502,7 +514,9 @@ def derive(
             swipe_min_speed_palms_s=speed,
             swipe_max_duration_s=duration,
         )
-    profile = CalibrationProfile(created=datetime.now().isoformat(timespec="minutes"), hand=hand)
+    profile = CalibrationProfile(
+        created=datetime.now().isoformat(timespec="minutes"), hand=hand, method=CALIBRATION_METHOD
+    )
     heart = results.get(G.HALF_HEART)
     if heart is not None:
         good = [h.features for h in heart.holds if heart_essentials(h.features)]

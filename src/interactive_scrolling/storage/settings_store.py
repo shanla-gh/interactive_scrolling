@@ -51,7 +51,7 @@ from interactive_scrolling.storage.paths import data_dir
 
 log = logging.getLogger(__name__)
 
-SETTINGS_VERSION = 3
+SETTINGS_VERSION = 4
 
 _V1_RENAMED = {
     "finger_swipe_min_distance_palms": "swipe_min_distance_palms",
@@ -258,6 +258,38 @@ VERTICAL_DIRECTION_NOTICE = (
 )
 
 
+CALIBRATION_REPAIR_NOTICE = (
+    "Your Quick Calibration from version 0.4 made swipes stricter than intended; swipe distance "
+    "and speed are back to the standard values (your half-heart shape is kept). Run Quick "
+    "Calibration again to personalize them."
+)
+
+
+def _repair_v04_calibration(
+    gestures: GestureSettings, calibration: CalibrationProfile, migrations: list[str]
+) -> GestureSettings:
+    """Version 0.4 calibration could raise the distance (to 1.34 for the Director) and the
+    speed; cap both at the standard values."""
+    if gestures.preset is not SensitivityPreset.PERSONAL or calibration.method >= 2:
+        return gestures
+    standard = GestureSettings()
+    repaired = replace(
+        gestures,
+        swipe_min_distance_palms=min(
+            gestures.swipe_min_distance_palms, standard.swipe_min_distance_palms
+        ),
+        swipe_horizontal_distance_palms=min(
+            gestures.swipe_horizontal_distance_palms, standard.swipe_min_distance_palms
+        ),
+        swipe_min_speed_palms_s=min(
+            gestures.swipe_min_speed_palms_s, standard.swipe_min_speed_palms_s
+        ),
+    )
+    if repaired != gestures:
+        migrations.append(CALIBRATION_REPAIR_NOTICE)
+    return repaired
+
+
 def _migrate_mapping_v2(data: dict[str, Any], migrations: list[str]) -> dict[str, Any]:
     """Version 2 default: finger down = next. Brief 004 makes finger up = next the default.
     Only an untouched old default is changed; any customised vertical mapping is kept."""
@@ -325,6 +357,8 @@ class SettingsStore:
         }
         for warning in warnings:
             log.warning("Settings: %s", warning)
+        if version <= 3:
+            gestures = _repair_v04_calibration(gestures, sections["calibration"], self.migrations)
         return UserSettings(gestures, mapping, analytics, port, token, **sections)
 
     def _backup_v1(self) -> None:

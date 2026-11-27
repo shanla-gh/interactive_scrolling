@@ -44,6 +44,10 @@ from interactive_scrolling.core.pipeline import (
 from interactive_scrolling.core.stall_monitor import Stall, StallMonitor
 from interactive_scrolling.gestures.types import GestureEvent
 from interactive_scrolling.services import ControlServices, offline_services
+from interactive_scrolling.storage.settings_store import (
+    CALIBRATION_REPAIR_NOTICE,
+    VERTICAL_DIRECTION_NOTICE,
+)
 from interactive_scrolling.ui.appearance_dialog import AppearanceDialog
 from interactive_scrolling.ui.bridge import PipelineBridge, QtLogHandler
 from interactive_scrolling.ui.control_bar import ControlBar
@@ -937,9 +941,13 @@ class MainWindow(QMainWindow):
         store = self.services.store
         if store is None or not store.migrations:
             return
-        notices = [m for m in store.migrations if m.startswith("Scroll direction")]
+        titles = {
+            VERTICAL_DIRECTION_NOTICE: "SCROLL DIRECTION UPDATED",
+            CALIBRATION_REPAIR_NOTICE: "CALIBRATION RESET - PLEASE RECALIBRATE",
+        }
+        notices = [m for m in store.migrations if m in titles]
         for notice in notices:
-            self.video.show_gesture("SCROLL DIRECTION UPDATED", palette.ACCENT_AMBER)
+            self.video.show_gesture(titles[notice], palette.ACCENT_AMBER)
             self.control_bar.set_last(notice)
             self.tray.notify("Interactive Scrolling", notice)
         store.migrations = [m for m in store.migrations if m not in notices]

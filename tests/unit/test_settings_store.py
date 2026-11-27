@@ -264,3 +264,51 @@ def test_custom_preset_keeps_its_values(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert SettingsStore(path).load().gestures.half_heart_hold_s == 0.7
+
+
+def test_version_04_calibration_that_raised_thresholds_is_repaired(tmp_path: Path) -> None:
+    """The Director's 0.4 calibration stored 1.34 hand lengths and 2.5 hand lengths/s."""
+    from interactive_scrolling.storage.settings_store import CALIBRATION_REPAIR_NOTICE
+
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "gestures": {
+                    "preset": "personal",
+                    "swipe_min_distance_palms": 1.34,
+                    "swipe_min_speed_palms_s": 2.5,
+                    "swipe_horizontal_distance_palms": 0.8,
+                    "swipe_max_duration_s": 1.0,
+                },
+                "calibration": {"created": "2026-11-27T09:51", "heart_hook": 0.127},
+                "pairing_token": "an-existing-pairing-token",
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = SettingsStore(path)
+    g = store.load().gestures
+    assert g.swipe_min_distance_palms == 0.8 and g.swipe_min_speed_palms_s == 2.0
+    assert g.swipe_max_duration_s == 1.0  # values that only relaxed recognition are kept
+    assert store.migrations == [CALIBRATION_REPAIR_NOTICE]
+    assert store.load().calibration.heart_hook == 0.127
+
+
+def test_new_calibration_is_not_touched(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "gestures": {"preset": "personal", "swipe_min_distance_palms": 0.9},
+                "calibration": {"method": 2},
+                "pairing_token": "an-existing-pairing-token",
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = SettingsStore(path)
+    assert store.load().gestures.swipe_min_distance_palms == 0.9
+    assert store.migrations == []
