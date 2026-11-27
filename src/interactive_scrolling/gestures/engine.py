@@ -37,12 +37,16 @@ from interactive_scrolling.config.settings import (
 from interactive_scrolling.core.timing import NS_PER_S
 from interactive_scrolling.gestures.pose import PoseLabel, analyze_pose, matches_personal_heart
 from interactive_scrolling.gestures.recognizers import (
+    FIST,
+    PALM,
     DirectionalSwipeRecognizer,
     HandSample,
     RecognizerOptions,
     StaticPoseRecognizer,
     Step,
+    fist,
     half_heart,
+    open_hand,
     pointing,
     stop_pose,
 )
@@ -107,6 +111,12 @@ class GestureEngine:
         s = self._settings
         o = self.options
         self.swipes = DirectionalSwipeRecognizer(s, pose_ok=pointing, pose_fraction=0.6, options=o)
+        # Brief 005: the same motion engine with the palm centre as reference, activated by a
+        # briefly held fist (default on in hybrid/fist style) or open hand (experimental).
+        self.fist_swipes = DirectionalSwipeRecognizer(s, pose_ok=fist, options=o, detector=FIST)
+        self.palm_swipes = DirectionalSwipeRecognizer(
+            s, pose_ok=open_hand, options=o, detector=PALM
+        )
         self.heart = StaticPoseRecognizer(
             GestureType.HALF_HEART,
             self._half_heart,
@@ -155,7 +165,7 @@ class GestureEngine:
 
     def _apply_enabled(self) -> None:
         s = self._settings
-        self.swipes.enabled = frozenset(
+        directions = frozenset(
             gesture
             for gesture, on in (
                 (GestureType.INDEX_SWIPE_DOWN, s.enable_swipe_down),
@@ -165,22 +175,31 @@ class GestureEngine:
             )
             if on
         )
+        self.swipes.enabled = directions if s.control_style in ("finger", "hybrid") else frozenset()
+        self.fist_swipes.enabled = (
+            directions if s.control_style in ("fist", "hybrid") else frozenset()
+        )
+        self.palm_swipes.enabled = directions if s.enable_palm_swipes else frozenset()
 
     def _enabled(self) -> list[DirectionalSwipeRecognizer | StaticPoseRecognizer]:
         s = self._settings
         out: list[DirectionalSwipeRecognizer | StaticPoseRecognizer] = []
-        if self.swipes.enabled:
-            # Disabled directions are followed but never confirm (see the recognizer), so a
-            # movement in a disabled direction cannot be misread as another one.
-            out.append(self.swipes)
+        for detector in self._swipe_detectors():
+            if detector.enabled:
+                # Disabled directions are followed but never confirm (see the recognizer), so
+                # a movement in a disabled direction cannot be misread as another one.
+                out.append(detector)
         if s.enable_half_heart:
             out.append(self.heart)
         if s.enable_stop:
             out.append(self.stop)
         return out
 
+    def _swipe_detectors(self) -> tuple[DirectionalSwipeRecognizer, ...]:
+        return (self.swipes, self.fist_swipes, self.palm_swipes)
+
     def _all(self) -> tuple[DirectionalSwipeRecognizer | StaticPoseRecognizer, ...]:
-        return (self.swipes, self.heart, self.stop)
+        return (*self._swipe_detectors(), self.heart, self.stop)
 
     def reset(self) -> None:
         """Forget the control hand and every candidate (camera restart, mode change)."""
@@ -326,6 +345,7 @@ class GestureEngine:
             ),
             palm_length_px=length,
             scale_px=pose.scale_px,
+            lowest_y=float(observation.landmarks[:, 1].max()),
         )
 
         if hand.track_duration_s < self._settings.min_track_age_s:
@@ -362,6 +382,7 @@ class GestureEngine:
             for r in enabled
         )
         event: GestureEvent | None = None
+        source = None
         candidates: list[GestureCandidate] = []
         for recognizer, step in steps:
             if step.rejection is not None:
@@ -373,6 +394,7 @@ class GestureEngine:
                 continue
             if step.event is not None and event is None and ts >= self._blocked_until_ns:
                 event = step.event
+                source = recognizer
             elif step.event is not None:
                 rejection = GestureRejection(
                     step.event.gesture,
@@ -386,8 +408,16 @@ class GestureEngine:
         if event is not None:
             self._blocked_until_ns = ts + int(self._settings.global_cooldown_s * NS_PER_S)
             for recognizer in self._all():
+                if recognizer is source:
+                    continue
                 if event.gesture not in recognizer.gestures:
                     recognizer.block_until(self._blocked_until_ns)
+                elif isinstance(recognizer, DirectionalSwipeRecognizer):
+                    # Another detector saw (part of) the same movement: one physical gesture,
+                    # one event; its return is suppressed in every detector.
+                    recognizer.block_until(self._blocked_until_ns)
+                    start_ns = ts - int(event.duration_s * NS_PER_S)
+                    recognizer.adopt(event.gesture, start_ns, ts)
             candidates = []
 
         return GestureFrame(

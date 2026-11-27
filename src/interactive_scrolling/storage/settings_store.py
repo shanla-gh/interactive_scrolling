@@ -205,6 +205,10 @@ def _gesture_settings_from_json(data: Any, warnings: list[str]) -> GestureSettin
                 if not isinstance(raw, bool):
                     raise TypeError("expected true/false")
                 value = raw
+            elif isinstance(getattr(settings, f.name), str):
+                if not isinstance(raw, str):
+                    raise TypeError("expected text")
+                value = raw
             else:
                 if isinstance(raw, bool) or not isinstance(raw, int | float):
                     raise TypeError("expected a number")

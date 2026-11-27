@@ -129,6 +129,8 @@ class GestureEvent:
     duration_s: float = 0.0
     palm_magnitude_palms: float | None = None
     decision_delay_s: float = 0.0
+    detector: str = ""
+    """Which detector recognized a swipe: ``finger``, ``fist`` or ``palm`` (Brief 005)."""
     """Time between meeting every criterion and the confirmation (the recognizer's own
     waiting, reported separately from the time the movement itself takes)."""
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)

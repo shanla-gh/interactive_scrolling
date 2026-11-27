@@ -23,6 +23,12 @@ is rotated by 90 degrees (down -> the user's right, up -> the user's left). Ever
 is replayed unchanged, so negatives still count. It checks the horizontal path of the
 recognizer with real kinematics; it is not a recording of horizontal swipes.
 
+``--synthetic-fist`` builds SEMI-SYNTHETIC fist swipes: the vertical pointing swipes of
+session 2 and the open-hand sweeps keep their real wrist and knuckle movement (the palm centre
+the fist detector follows), only the fingers and thumb are re-posed as a curled fist. Labels
+become ``synthetic_fist_*``. It measures the palm-centre motion path on real kinematics; it is
+not a recording of fists (a wrist-only fist flick is not represented).
+
 ``--any-pose`` is a diagnostic: the swipe recognizer accepts any hand pose, so the open-hand
 sweeps of version 0.2 can be used to check direction discrimination and return-movement
 handling on real horizontal motion. It is not a measurement of the index-swipe gesture.
@@ -128,6 +134,18 @@ for _label, _gesture in SYNTHETIC_HORIZONTAL.values():
     EXPECTATIONS[_label] = Expectation(
         f"SYNTHETIC index swipe {_gesture.value.rsplit('_', 1)[1]} (rotated s2)", _gesture, 4
     )
+SYNTHETIC_FIST = {
+    "point_down_x4": ("synthetic_fist_down_x4", G.INDEX_SWIPE_DOWN, 4),
+    "point_up_x4": ("synthetic_fist_up_x4", G.INDEX_SWIPE_UP, 4),
+    "sweep_right_x3": ("synthetic_fist_right_x3", G.INDEX_SWIPE_RIGHT, 3),
+    "sweep_left_x3": ("synthetic_fist_left_x3", G.INDEX_SWIPE_LEFT, 3),
+}
+for _label, _gesture, _count in SYNTHETIC_FIST.values():
+    EXPECTATIONS[_label] = Expectation(
+        f"SYNTHETIC fist swipe {_gesture.value.rsplit('_', 1)[1]} (real palm motion)",
+        _gesture,
+        _count,
+    )
 NEGATIVE_PREFIX = "neg_"
 MIN_SEGMENT_FRAMES = 15
 """Shorter labeled runs are carry-over frames of the previous prompt."""
@@ -174,6 +192,51 @@ def expectation_for(label: str, mirrored: bool, any_pose: bool = False) -> Expec
 
 def load(path: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))["frames"]
+
+
+def fist_shape(lm: np.ndarray, w: int, h: int) -> np.ndarray:
+    """Re-pose fingers and thumb as a curled fist; wrist and knuckles keep their position."""
+    out = lm.copy()
+    px = lm[:, :2] * (w, h)
+    axis = px[9] - px[0]
+    length = float(np.hypot(*axis)) or 1.0
+    u = axis / length
+    for mcp in (5, 9, 13, 17):
+        base = px[mcp]
+        pip = base + 0.30 * length * u
+        back = np.array([-u[0] * 0.87 - u[1] * 0.5, -u[1] * 0.87 + u[0] * 0.5])
+        dip = pip + 0.20 * length * back
+        tip = dip + 0.15 * length * (-u)
+        for index, point in ((mcp + 1, pip), (mcp + 2, dip), (mcp + 3, tip)):
+            out[index, 0], out[index, 1] = point[0] / w, point[1] / h
+            out[index, 2] = lm[mcp, 2]
+    thumb_target = px[5] + 0.15 * length * u
+    for k, index in enumerate((2, 3, 4)):
+        point = px[1] + (k + 1) / 3 * (thumb_target - px[1])
+        out[index, 0], out[index, 1] = point[0] / w, point[1] / h
+        out[index, 2] = lm[1, 2]
+    return out
+
+
+def fist_segments(frames: list[dict]) -> list[dict]:
+    """See ``--synthetic-fist``."""
+    out: list[dict] = []
+    for frame in frames:
+        label = frame["label"]
+        if label not in SYNTHETIC_FIST:
+            out.append(frame)
+            continue
+        hands = [
+            {
+                **hand,
+                "lm": fist_shape(
+                    np.asarray(hand["lm"], dtype=np.float64), frame["w"], frame["h"]
+                ).tolist(),
+            }
+            for hand in frame["hands"]
+        ]
+        out.append({**frame, "label": SYNTHETIC_FIST[label][0], "hands": hands})
+    return out
 
 
 def rotate_vertical_segments(frames: list[dict]) -> list[dict]:
@@ -392,6 +455,11 @@ def main() -> int:
     )
     parser.add_argument("--any-pose", action="store_true", help="diagnostic: ignore the hand pose")
     parser.add_argument(
+        "--synthetic-fist",
+        action="store_true",
+        help="re-pose s2 swipes and the sweeps as fists (semi-synthetic, real palm motion)",
+    )
+    parser.add_argument(
         "--synthetic-horizontal",
         action="store_true",
         help="replace the s2 vertical pointing swipes by rotated (semi-synthetic) horizontal ones",
@@ -412,7 +480,13 @@ def main() -> int:
     settings = GestureSettings.from_preset(SensitivityPreset(args.preset))
     for item in args.set:
         name, value = item.split("=", 1)
-        settings = replace(settings, **{name: float(value)})
+        current = getattr(settings, name)
+        typed: object = value
+        if isinstance(current, bool):
+            typed = value == "true"
+        elif isinstance(current, float):
+            typed = float(value)
+        settings = replace(settings, **{name: typed})
     options = V03_OPTIONS if args.v03 else RecognizerOptions()
     for item in args.option:
         name, value = item.split("=", 1)
@@ -427,6 +501,8 @@ def main() -> int:
         frames = load(path)
         if args.synthetic_horizontal:
             frames = rotate_vertical_segments(frames)
+        if args.synthetic_fist:
+            frames = fist_segments(frames)
         evaluate(
             frames,
             settings,

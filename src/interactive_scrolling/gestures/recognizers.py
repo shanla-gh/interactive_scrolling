@@ -121,6 +121,10 @@ ORIGIN_POSE_MIN_S = 0.06
 movement is common in the recordings and caused false swipes). Time based, so it means the
 same at 15 and at 30 frames per second."""
 ENDPOINT_POSE_FRACTION = 0.5
+HAND_MOTION_SHARE = 0.4
+"""A stroke whose palm centre travels at least this share of the fingertip distance is a hand
+or wrist movement (Brief 005: intended downward hand swipes moved the palm 2.2 hand lengths
+median, finger curls 0.05)."""
 FLICK_REEXTEND_S = 0.8
 """A curled-finger flick is confirmed only if the finger recovers within this time: it is
 pointing again, or the fingertip has started back by ``FLICK_RECOVERY_PALMS`` (earlier than the
@@ -131,6 +135,10 @@ END_WAIT_MAX_S = 0.3
 """``confirm="end"``: a qualified stroke is confirmed when it stops, at the latest this long
 after it met all criteria."""
 MAX_TRAVEL_PALMS = 4.5
+BOTTOM_ZONE = 0.85
+"""A downward stroke with the hand below this fraction of the image height waits until the hand
+stops inside the picture (Brief 005: a hand dropped out of view had its wrist at 0.90, real
+downward swipes at 0.62-0.74)."""
 """``confirm="end"``: a stroke that travels further than this before stopping is a large arm
 movement (for example lowering the hand out of view), not a swipe."""
 STATIC_WINDOW_S = 0.3
@@ -154,6 +162,9 @@ class RecognizerOptions:
     static_while_stabilizing: bool = False
     """Static poses may start their hold while a new hand is still stabilizing (evaluated in
     Brief 004: no recall gain on the recordings, so not enabled)."""
+    hand_motion_now: bool = True
+    """Confirm a stroke from a held pointing pose at once when the palm moved with it, even if
+    the finger reads as curled at the threshold (Brief 005)."""
     confirm: str = "early"
     """``"early"``: confirm as soon as all criteria are met; ``"end"``: wait until the stroke
     stops inside the view (rejects hands leaving the picture, costs latency)."""
@@ -184,6 +195,43 @@ V03_OPTIONS = RecognizerOptions(
 
 
 @dataclass(frozen=True, slots=True)
+class DetectorConfig:
+    """One way of making a directional swipe (Brief 005, motion-first).
+
+    All detectors share the stroke segmentation, direction scoring and return handling of
+    :class:`DirectionalSwipeRecognizer`; they differ in the motion reference and in how the
+    activating pose has to be shown."""
+
+    name: str
+    reference: str
+    """``"fingertip"`` (index fingertip) or ``"palm"`` (mean of wrist and the four knuckles:
+    whole-hand or wrist movement; opening or closing the hand hardly moves it)."""
+    origin_window_s: float
+    origin_fraction: float
+    origin_min_s: float
+    """The activating pose must be seen in ``origin_fraction`` of the frames of the
+    ``origin_window_s`` before the stroke, spanning at least ``origin_min_s``."""
+    flicks: bool
+    """Finger flicks (finger curled at the threshold) wait for the finger to recover."""
+    require_origin: bool
+    """The stroke must start from the held pose (an intentional activation cue)."""
+    origin_still_s: float = 0.0
+    """The reference must have been still (net drift <= ``ORIGIN_STILL_DRIFT``) for this long
+    right before the stroke: a fist that is *presented* and then moved, not a closed hand that
+    is repositioned in the middle of other movement."""
+
+
+FINGER = DetectorConfig("finger", "fingertip", 0.25, 0.6, 0.06, flicks=True, require_origin=False)
+FIST = DetectorConfig(
+    "fist", "palm", 0.45, 0.7, 0.25, flicks=False, require_origin=True, origin_still_s=0.25
+)
+PALM = DetectorConfig(
+    "palm", "palm", 0.45, 0.7, 0.25, flicks=False, require_origin=True, origin_still_s=0.25
+)
+ORIGIN_STILL_DRIFT = 0.25
+
+
+@dataclass(frozen=True, slots=True)
 class HandSample:
     """What the recognizers need about the control hand in one frame."""
 
@@ -201,12 +249,21 @@ class HandSample:
     scale_px: float = 0.0
     """Rotation-tolerant hand scale of this frame (``pose.hand_scale_px``); 0 = use the palm
     length."""
+    lowest_y: float = 0.0
+    """Lowest landmark of the hand, normalized image height (1.0 = bottom edge)."""
 
     @property
     def fingertip_velocity_px(self) -> Vector:
         return (
             self.fingertip_velocity[0] * self.palm_length_px,
             self.fingertip_velocity[1] * self.palm_length_px,
+        )
+
+    @property
+    def palm_velocity_px(self) -> Vector:
+        return (
+            self.palm_velocity[0] * self.palm_length_px,
+            self.palm_velocity[1] * self.palm_length_px,
         )
 
     @property
@@ -340,11 +397,13 @@ class DirectionalSwipeRecognizer:
         pose_ok: Callable[[HandPose], bool],
         pose_fraction: float = 0.6,
         options: RecognizerOptions | None = None,
+        detector: DetectorConfig = FINGER,
     ) -> None:
         self.settings = settings
         self.pose_ok = pose_ok
         self.pose_fraction = pose_fraction
         self.options = options or RecognizerOptions()
+        self.detector = detector
         self.enabled: frozenset[GestureType] = frozenset(SWIPE_DIRECTIONS)
         """Directions that may confirm. Disabled directions are still followed (so their
         movement cannot be misread as another direction) but are rejected."""
@@ -375,6 +434,7 @@ class DirectionalSwipeRecognizer:
         self._scale_ns: int | None = None
         self._pose_history: deque[tuple[int, bool]] = deque()
         self._flick: _PendingFlick | None = None
+        self._positions: deque[tuple[int, Vector]] = deque()
         self.phase = GesturePhase.REARMING if rearm else GesturePhase.IDLE
 
     def block_until(self, timestamp_ns: int) -> None:
@@ -404,6 +464,39 @@ class DirectionalSwipeRecognizer:
             return self._stroke.scale_px
         return self._scale if self._scale else sample.frame_scale_px
 
+    def _pos(self, sample: HandSample) -> Vector:
+        return sample.palm if self.detector.reference == "palm" else sample.fingertip
+
+    def _vel_px(self, sample: HandSample) -> Vector:
+        if self.detector.reference == "palm":
+            return sample.palm_velocity_px
+        return sample.fingertip_velocity_px
+
+    def adopt(self, gesture: GestureType, start_ns: int, ts: int) -> None:
+        """A swipe confirmed by another detector of the same hand: remember it in this
+        detector's own reference, so its return is suppressed here as well."""
+        if gesture not in SWIPE_DIRECTIONS or not self._positions or self._scale is None:
+            return
+        start = min(self._positions, key=lambda item: abs(item[0] - start_ns))[1]
+        now = self._positions[-1][1]
+        length = _dot(self._displacement(now, start, self._scale), SWIPE_DIRECTIONS[gesture])
+        self._last = _LastSwipe(gesture, start, max(length, 0.0), ts, self._scale)
+        self._stroke = None
+        self._flick = None
+
+    def _was_still(self, until_ns: int, sample: HandSample) -> bool:
+        need = self.detector.origin_still_s
+        if need <= 0:
+            return True
+        since = until_ns - int(need * NS_PER_S)
+        window = [pos for t, pos in self._positions if since <= t <= until_ns]
+        if len(window) < 2 or self._positions[0][0] > since:
+            return False
+        xs = [p[0] for p in window]
+        ys = [p[1] for p in window]
+        scale = self._scale or sample.frame_scale_px
+        return math.hypot(max(xs) - min(xs), max(ys) - min(ys)) / scale <= ORIGIN_STILL_DRIFT
+
     @staticmethod
     def _displacement(position: Vector, origin: Vector, scale: float) -> Vector:
         return to_user(((position[0] - origin[0]) / scale, (position[1] - origin[1]) / scale))
@@ -416,7 +509,7 @@ class DirectionalSwipeRecognizer:
             return
         ts = sample.timestamp_ns
         direction = SWIPE_DIRECTIONS[last.gesture]
-        moved = _dot(self._displacement(sample.fingertip, last.start_px, last.scale_px), direction)
+        moved = _dot(self._displacement(self._pos(sample), last.start_px, last.scale_px), direction)
         recent = last.end_ns >= ts - int(0.1 * NS_PER_S)
         if recent and _dot(v_user, direction) > STALL_SPEED:
             last.end_ns = ts
@@ -437,21 +530,33 @@ class DirectionalSwipeRecognizer:
         return _seconds(start_ns - last.end_ns) <= self.settings.return_window_s
 
     def _recent_pose(self, ts: int) -> bool:
-        cutoff = ts - int(POSE_WINDOW_S * NS_PER_S)
+        d = self.detector
+        cutoff = ts - int(d.origin_window_s * NS_PER_S)
         window = [(t, ok) for t, ok in self._pose_history if t >= cutoff]
         hits = [t for t, ok in window if ok]
-        if len(hits) < 2 or len(hits) < ORIGIN_POSE_FRACTION * len(window):
+        if len(hits) < 2 or len(hits) < d.origin_fraction * len(window):
             return False
-        return _seconds(hits[-1] - hits[0]) >= ORIGIN_POSE_MIN_S
+        return _seconds(hits[-1] - hits[0]) >= d.origin_min_s
 
-    def _pose_accepted(self, stroke: _Stroke, pose_now: bool) -> str:
-        """ "now" (confirm), "flick" (wait for the finger to extend again) or "" (reject)."""
+    def _pose_accepted(self, stroke: _Stroke, pose_now: bool, palm_share: float = 0.0) -> str:
+        """ "now" (confirm), "flick" (wait for the finger to extend again) or "" (reject).
+
+        ``palm_share``: palm-centre travel along the direction / fingertip travel."""
         fraction = stroke.pose_frames / stroke.frames
         if self.options.pose_rule == "fraction":
             return "now" if fraction >= self.pose_fraction and stroke.pose_frames >= 2 else ""
+        if self.detector.require_origin:
+            # Fist / palm: activated by the held pose, which must stay mostly visible.
+            held = pose_now or fraction >= ENDPOINT_POSE_FRACTION
+            return "now" if stroke.origin_pose and held else ""
         if pose_now and (stroke.origin_pose or fraction >= ENDPOINT_POSE_FRACTION):
             return "now"
-        if stroke.origin_pose:
+        if stroke.origin_pose and self.detector.flicks:
+            if self.options.hand_motion_now and palm_share >= HAND_MOTION_SHARE:
+                # The palm moved with the fingertip: a hand or wrist movement, not a finger
+                # curl (fast motion blurs the finger, which then reads as curled). Relaxing the
+                # finger moves only the fingertip, so it still waits for the recovery.
+                return "now"
             return "flick"
         return ""
 
@@ -495,16 +600,19 @@ class DirectionalSwipeRecognizer:
 
     def update(self, sample: HandSample) -> Step:
         ts = sample.timestamp_ns
-        position = sample.fingertip
+        position = self._pos(sample)
+        self._positions.append((ts, position))
+        while self._positions and self._positions[0][0] < ts - int(2.0 * NS_PER_S):
+            self._positions.popleft()
         pose_now = self.pose_ok(sample.pose)
         self._pose_history.append((ts, pose_now))
-        cutoff = ts - int(2 * POSE_WINDOW_S * NS_PER_S)
+        cutoff = ts - int(2 * max(POSE_WINDOW_S, self.detector.origin_window_s) * NS_PER_S)
         while self._pose_history and self._pose_history[0][0] < cutoff:
             self._pose_history.popleft()
         if self._stroke is None:
             self._update_scale(sample)
         scale = self._current_scale(sample)
-        vx, vy = sample.fingertip_velocity_px
+        vx, vy = self._vel_px(sample)
         v_user = to_user((vx / scale, vy / scale))
         speed = math.hypot(*v_user)
         self._follow_last(sample, v_user, speed)
@@ -569,13 +677,13 @@ class DirectionalSwipeRecognizer:
         v_axis = _dot(v_user, direction)
         stroke.peak_px = max(stroke.peak_px, v_axis * scale)
         peak = stroke.peak_px / scale
-        d = self._displacement(sample.fingertip, stroke.start_pos, scale)
+        d = self._displacement(self._pos(sample), stroke.start_pos, scale)
         d_axis = _dot(d, direction)
         d_cross = _across(d, direction)
         if d_axis > stroke.turn[0]:
-            stroke.turn = (d_axis, sample.fingertip, ts)
+            stroke.turn = (d_axis, self._pos(sample), ts)
         elapsed = _seconds(ts - stroke.start_ns)
-        distance = swipe_distance(s, gesture)
+        distance = swipe_distance(s, gesture, self.detector.name)
 
         def reject(
             code: str,
@@ -602,7 +710,11 @@ class DirectionalSwipeRecognizer:
                 return reject(
                     RejectCode.TOO_SLOW, "too slow", peak, s.swipe_min_speed_palms_s, "palms/s"
                 )
-            pose_verdict = self._pose_accepted(stroke, pose_now)
+            palm_share = 0.0
+            if d_axis > 0:
+                palm_move = self._displacement(sample.palm, stroke.palm_start, scale)
+                palm_share = _dot(palm_move, direction) / d_axis
+            pose_verdict = self._pose_accepted(stroke, pose_now, palm_share)
             if not pose_verdict:
                 fraction = stroke.pose_frames / stroke.frames
                 return reject(
@@ -660,6 +772,22 @@ class DirectionalSwipeRecognizer:
                     stroke, d_axis, peak, elapsed, ts, sample.palm, sample.track_id
                 )
                 return Step(candidate=GestureCandidate(gesture, 1.0, elapsed))
+            leaving = gesture is GestureType.INDEX_SWIPE_DOWN and sample.lowest_y > BOTTOM_ZONE
+            if leaving and self.options.confirm != "end":
+                # Near the bottom of the picture a downward stroke may be the hand being lowered
+                # out of view (a recorded false swipe): confirm only once it stops in view.
+                if not stroke.qualified_ns:
+                    stroke.qualified_ns = ts
+                if v_axis >= STALL_SPEED:
+                    if _seconds(ts - stroke.qualified_ns) >= END_WAIT_MAX_S:
+                        return reject(
+                            RejectCode.TOO_FAR,
+                            "hand moving out of the picture",
+                            sample.lowest_y,
+                            BOTTOM_ZONE,
+                            "image height",
+                        )
+                    return Step(candidate=GestureCandidate(gesture, 1.0, elapsed))
             if self.options.confirm == "end":
                 if not stroke.qualified_ns:
                     stroke.qualified_ns = ts
@@ -731,7 +859,7 @@ class DirectionalSwipeRecognizer:
         stroke = flick.stroke
         _, turn_pos, _ = stroke.turn
         back = -_dot(
-            self._displacement(sample.fingertip, turn_pos, stroke.scale_px), stroke.direction
+            self._displacement(self._pos(sample), turn_pos, stroke.scale_px), stroke.direction
         )
         if (pose_now or back >= FLICK_RECOVERY_PALMS) and ts > flick.qualified_ns:
             self._flick = None
@@ -756,6 +884,7 @@ class DirectionalSwipeRecognizer:
                     3,
                 ),
                 decision_delay_s=round(waited, 3),
+                detector=self.detector.name,
             )
             self._cooldown_until_ns = ts + int(self.settings.cooldown_s * NS_PER_S)
             self.phase = GesturePhase.CONFIRMED
@@ -794,6 +923,7 @@ class DirectionalSwipeRecognizer:
             decision_delay_s=round(_seconds(ts - stroke.qualified_ns), 3)
             if stroke.qualified_ns
             else 0.0,
+            detector=self.detector.name,
         )
         self._remember(stroke, d_axis, ts, confirmed=True)
         self._stroke = None
@@ -812,6 +942,12 @@ class DirectionalSwipeRecognizer:
         ts = sample.timestamp_ns
         if self.options.pose_rule == "fraction" and not pose_now:
             return Step()
+        if self.detector.require_origin and not (
+            self._recent_pose(ts) and self._was_still(start_ns, sample)
+        ):
+            # A fist/palm detector only follows movements that start from its held, still
+            # pose; anything else belongs to another detector (and is not explained here).
+            return Step()
         scale = self._current_scale(sample)
         if self.options.scale == "stroke_max":
             scale = sample.palm_length_px
@@ -829,7 +965,7 @@ class DirectionalSwipeRecognizer:
             turn=(0.0, start_pos, start_ns),
             onset_seen=self._seen_slow,
         )
-        vx, vy = sample.fingertip_velocity_px
+        vx, vy = self._vel_px(sample)
         v_axis = _dot(to_user((vx / scale, vy / scale)), stroke.direction)
         stroke.peak_px = max(0.0, v_axis) * scale
         self._stroke = stroke
@@ -838,8 +974,22 @@ class DirectionalSwipeRecognizer:
         return Step(candidate=GestureCandidate(gesture, 0.0, 0.0))
 
 
-def swipe_distance(settings: GestureSettings, gesture: GestureType) -> float:
-    """Required fingertip travel for ``gesture`` (left/right may have their own value)."""
+def swipe_distance(
+    settings: GestureSettings, gesture: GestureType, detector: str = "finger"
+) -> float:
+    """Required travel for ``gesture``: a per-direction value if set, then the left/right
+    value for horizontal swipes, then the shared one. Fist and palm detectors measure the palm
+    centre and use their own distance."""
+    if detector != "finger":
+        return settings.fist_swipe_distance_palms
+    override = {
+        GestureType.INDEX_SWIPE_UP: settings.swipe_up_distance_palms,
+        GestureType.INDEX_SWIPE_DOWN: settings.swipe_down_distance_palms,
+        GestureType.INDEX_SWIPE_LEFT: settings.swipe_left_distance_palms,
+        GestureType.INDEX_SWIPE_RIGHT: settings.swipe_right_distance_palms,
+    }[gesture]
+    if override > 0:
+        return override
     horizontal = gesture in (GestureType.INDEX_SWIPE_LEFT, GestureType.INDEX_SWIPE_RIGHT)
     if horizontal and settings.swipe_horizontal_distance_palms > 0:
         return settings.swipe_horizontal_distance_palms
@@ -1020,3 +1170,12 @@ def half_heart(pose: HandPose) -> bool:
 
 def stop_pose(pose: HandPose) -> bool:
     return pose.is_stop_pose
+
+
+def fist(pose: HandPose) -> bool:
+    """A closed hand (pose label FIST: four fingers curled, not a thumbs-up or half-heart)."""
+    return pose.label is PoseLabel.FIST
+
+
+def open_hand(pose: HandPose) -> bool:
+    return pose.label is PoseLabel.OPEN_PALM

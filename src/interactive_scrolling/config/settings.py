@@ -213,7 +213,13 @@ _RANGES: dict[str, tuple[float, float]] = {
     "min_track_age_s": (0.0, 2.0),
     "swipe_horizontal_distance_palms": (0.0, 3.0),
     "stop_upright_deg": (20.0, 75.0),
+    "swipe_up_distance_palms": (0.0, 3.0),
+    "swipe_down_distance_palms": (0.0, 3.0),
+    "swipe_left_distance_palms": (0.0, 3.0),
+    "swipe_right_distance_palms": (0.0, 3.0),
+    "fist_swipe_distance_palms": (0.15, 3.0),
 }
+CONTROL_STYLES = ("finger", "fist", "hybrid")
 
 GESTURE_ENABLE_FIELDS = (
     "enable_swipe_down",
@@ -265,6 +271,17 @@ class GestureSettings:
     Calibration may set the two axes separately (comfortable ranges differ by person)."""
     stop_upright_deg: float = 40.0
     """How far the fingers of the stop pose may tilt from straight up."""
+    swipe_up_distance_palms: float = 0.0
+    swipe_down_distance_palms: float = 0.0
+    swipe_left_distance_palms: float = 0.0
+    swipe_right_distance_palms: float = 0.0
+    """Per-direction finger-swipe distances from Quick Calibration; 0 = shared value."""
+    control_style: str = "finger"
+    """``finger`` (index swipes), ``fist`` (closed-hand swipes) or ``hybrid`` (both)."""
+    fist_swipe_distance_palms: float = 0.5
+    """Palm-centre travel of a fist (or palm) swipe."""
+    enable_palm_swipes: bool = False
+    """Experimental: open-hand swipes (conflict with the stop pose, see GESTURES.md)."""
     control_hand: ControlHandPreference = ControlHandPreference.AUTO
     enable_swipe_down: bool = True
     enable_swipe_up: bool = True
@@ -274,6 +291,8 @@ class GestureSettings:
     enable_stop: bool = True
 
     def __post_init__(self) -> None:
+        if self.control_style not in CONTROL_STYLES:
+            raise ConfigError(f"control_style must be one of {CONTROL_STYLES}")
         for name, (low, high) in _RANGES.items():
             value = getattr(self, name)
             if not isinstance(value, int | float) or not low <= value <= high:
