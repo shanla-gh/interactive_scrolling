@@ -60,7 +60,7 @@ recordings yet - that is the remaining blocker. Details:
 | `pytest tests/live --live-youtube` | 3 of 4 runs passed; the fourth a correct refusal while Edge's own startup tab was in front |
 | Fixture browser tests (real extension, headless Edge) | 16 passed, stable over 4 repetitions |
 | GitHub Actions (Windows) | success on every pushed commit except f4a8a31 (a lint warning, fixed in the next commit) |
-| Packaged build (`scriptsuild.ps1`) `--self-test` with fresh user data | PASS (0.4.0b1, three models verified, inference ok) |
+| Packaged build (`scripts\build.ps1`) `--self-test` with fresh user data | PASS (0.4.0b1, three models verified, inference ok) |
 
 ## Performance (development machine, 1280x720, Gesture test mode, production services)
 
