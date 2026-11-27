@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0b1] - beta (not released; Director validation pending)
+
+Engineering Brief 007: product experience and Broadcast Mode. Gesture recognition is
+unchanged from 0.6.0b1 (protected by a regression gate; `docs/benchmarks/GESTURE_BENCHMARK_007.md`).
+
+### Changed
+
+- Status wording: the header says CAMERA ON/OFF (it said LIVE when only the camera was on); the
+  control bar reads Gestures off / Gesture test / Live control / Stop control and
+  "Browser: ..."; "no controller available" became "browser connection not available".
+- Layout at 125-150 % display scaling: no clipped mode buttons, five side tabs (display options
+  and system figures share one), a status bar that fits, and a Gesture settings dialog that fits
+  a laptop screen (raw thresholds behind "Show advanced thresholds").
+- Practice and rejection texts no longer assume a pointing finger.
+- "Creator overlay" is called Broadcast Mode everywhere.
+
+### Added
+
+- Broadcast Mode: gesture-control status chip, session timer and counters (the counters layer
+  was never filled), Position menu, recovery of an overlay saved off every screen, display-only
+  skeleton smoothing.
+- Transparent background keeps low-confidence clothing enclosed by the person.
+- Getting started window (first start and Help); extension folder copy button; broadcast and
+  extension guides.
+- Tools: recognition baselines and `benchmark_motion.py --baseline`, `capture_screenshots.py`,
+  `experiment_mask_refinement.py`, stability sessions in Broadcast/Background Mode with optional
+  models and mode cycling.
+
 ## [0.6.0b1] - beta (not released; Director validation pending)
 
 Engineering Brief 006: pose-independent motion recognition. Evidence:

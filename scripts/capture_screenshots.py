@@ -193,6 +193,12 @@ def main() -> int:
     pump(app, 0.5)
     if want("00_main_camera_off"):
         save(window, out, "00_main_camera_off")
+    if want("00b_getting_started"):
+        window.open_getting_started()
+        pump(app, 0.5)
+        save(window.getting_started, out, "00b_getting_started")
+        window.getting_started.reject()
+        pump(app, 0.2)
     window.start_camera()
     pump(app, 4.5)
     tabs = window.side_tabs

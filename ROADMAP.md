@@ -46,12 +46,13 @@ Eye and face tracking never control anything.
 | **M10** Minimal Co-op Doomscroll | Two-person host/guest gesture control of one Shorts feed over a private LAN session | Brief 003 |
 | **M11** Packaging & Release Candidate | Windows distribution, setup guide, clean-environment validation | Brief 003 |
 | **Beta stabilization** (Brief 004) | Root-cause analysis of the Director's test, gesture engine rework, diagnostics, Practice and Quick Calibration, browser reliability, benchmark and Audit 006 | Implemented; Director beta validation pending |
+| **Product experience** (Brief 007, M26-M34) | Baseline gate, clearer status and layout, Broadcast Mode status/positioning/smoothing, transparency fill, first-use guide, endurance tooling | Implemented; visual and creator usability need the Director |
 | **Pose-independent motion** (Brief 006, M19-M25) | Duplicate-hand fix, any-hand-shape engine, tracking-gap rules, trajectory overlay, frame-timing diagnostics | Implemented; whole-hand swipes and accidental swipes need the Director's judgement and a new held-out recording |
 | **Motion-first gestures** (Brief 005, M12-M18) | Shared motion engine, fist swipes (experimental), downward-motion analysis, per-direction calibration, motion visualization | Implemented; fist control and downward comfort need the Director's validation and session-5 recordings |
 
-Integration audits follow M4 (003), M6 (004), M10 (005), the beta stabilization (006), the motion-first work (007) and pose-independent motion (008).
+Integration audits follow M4 (003), M6 (004), M10 (005), the beta stabilization (006), the motion-first work (007) and pose-independent motion (008) and product experience (009).
 
-**Next (needs the Director):** beta validation (`docs/milestones/BRIEF_006_VALIDATION.md`) and
+**Next (needs the Director):** beta validation (`docs/milestones/BRIEF_007_VALIDATION.md`) and
 the session-5 recordings with each hand (about 3 minutes each); a decision on finger vs fist
 control; then tuning of left/right swipes, the half-heart and
 the stop pose on real data, and the 30-minute false-trigger measurement. No new features until

@@ -4,10 +4,28 @@ Source of truth for the current state of the project. Update it with every check
 
 | | |
 |---|---|
-| Version | 0.6.0b1 - beta, **not released** (no tag) |
-| Active work | Engineering Brief 006 (pose-independent motion) implemented; **Director validation pending** |
-| Engineering decision | PARTIALLY READY - TARGETED PHYSICAL DATA REQUIRED |
+| Version | 0.7.0b1 - beta, **not released** (no tag) |
+| Active work | Engineering Brief 007 (product experience, Broadcast Mode) implemented; **Director validation pending** |
+| Engineering decision | PARTIALLY READY - SPECIFIC VISUAL OR PHYSICAL VERIFICATION REQUIRED |
 | Last updated | 2026-11-27 |
+
+## Brief 007 in one paragraph
+
+The Director approved the feel of 0.6.0b1's motion recognition; it is frozen as a baseline and
+unchanged (two false-positive and one low-frame-rate candidate were rejected by the new
+regression gate). The product work was reviewed on rendered screenshots at 100-150 % scaling:
+the camera pill no longer says LIVE, nothing is clipped, Gesture settings fits a laptop, and the
+wording separates camera, gesture control and browser state. Broadcast Mode gained a
+gesture-control chip, a working counters/session-timer layer, corner positioning with
+off-screen recovery and display-only skeleton smoothing; the transparent background keeps
+low-confidence clothing inside the person (synthetic evidence). A first-use guide, broadcast
+and extension guides, and 55 minutes of automated endurance runs (no leaks, safe mode
+transitions) complete it. Open: human visual checks, OBS's Windows Graphics Capture, a hidden-
+window frame-drop finding, and an intermittent real-YouTube failure that the approved 0.6
+code shows too. Details: [Brief 007 report](docs/milestones/BRIEF_007_REPORT.md),
+[Audit 009](docs/audits/INTEGRATION_AUDIT_009.md),
+[performance](docs/benchmarks/PERFORMANCE_007.md),
+[validation](docs/milestones/BRIEF_007_VALIDATION.md).
 
 ## Brief 006 in one paragraph
 
@@ -56,6 +74,8 @@ Details: [Brief 005 report](docs/milestones/BRIEF_005_REPORT.md),
 | Integration Audit 007 | technical PASS; not a full pass | [Audit 007](docs/audits/INTEGRATION_AUDIT_007.md) |
 | Brief 006 pose-independent motion (M19-M25) | implemented; technical pass; whole-hand swipes and accidental swipes need the Director | [Brief 006 report](docs/milestones/BRIEF_006_REPORT.md) |
 | Integration Audit 008 | technical PASS; not a full pass | [Audit 008](docs/audits/INTEGRATION_AUDIT_008.md) |
+| Brief 007 product experience (M26-M34) | implemented; technical pass; visual and creator checks need the Director | [Brief 007 report](docs/milestones/BRIEF_007_REPORT.md) |
+| Integration Audit 009 | technical PASS; not a full pass | [Audit 009](docs/audits/INTEGRATION_AUDIT_009.md) |
 
 ## Recognition results (development data from one person; all four real recordings)
 
@@ -69,33 +89,32 @@ Details: [Brief 005 report](docs/milestones/BRIEF_005_REPORT.md),
 | 15 fps / 10 % frame loss (synthetic) | finger up 4/8 (3 wrong) / 6/8 (2 wrong) | missed flicks let their return through |
 | Half-heart, stop | unchanged from 0.5 | |
 
-## Test results (2026-11-27)
+## Test results (2026-11-27, Brief 007)
 
 | Command | Result |
 |---|---|
 | `ruff format --check` / `ruff check` | clean |
-| `pytest` | 686 passed, 0 failed, 0 expected failures, 6 skipped (webcam and live tests, run below) - Brief 005 end 650 |
-| Repeated full runs | 5 during development and 3 on the final code: all green |
+| `pytest` | 699 passed, 0 failed, 0 expected failures, 6 skipped (webcam and live tests, run separately) - Brief 006 end 686 |
+| Repeated full runs | 3 consecutive runs on the final code: all 699 passed |
 | `pytest tests/hardware --hardware` | 5 passed |
-| `pytest tests/live --live-youtube` | 3 of 3 runs passed (next 278-623 ms, previous 234-242 ms) |
-| Packaged build `--self-test` | PASS (0.6.0b1) |
+| `pytest tests/live --live-youtube` | 7 of 11 runs passed; the 4 failures are a YouTube-side change (consent redirect / Short not advancing in a fresh profile) that the approved 0.6.0b1 code shows too (1 of 3) |
+| Gesture regression gate | no regression against all five 0.6.0b1 baselines |
+| Packaged build `--self-test` | PASS (0.7.0b1) |
 | GitHub Actions | see the commit list; checked after the last push |
 
-## Performance (development machine, 1280x720)
+## Performance (development machine, 1280x720; see docs/benchmarks/PERFORMANCE_007.md)
 
-| Measure | Brief 005 | Brief 006 |
-|---|---|---|
-| Capture / processing FPS | 30.1 / 30.1 | 30.4 / 30.4 (6 min GUI session) |
-| Webcam frame rate available | - | 30 fps only (60 requested, 30 delivered) |
-| Capture-to-result latency | 14.0 ms (hand in view) | 9.6 ms, **no hand in view** (not comparable); pipeline benchmark: 9.7 ms hand-only, 11.0 ms with segmentation and face (p95 17.8) |
-| Recognition per frame (replay, 56,682 frames) | 0.144 ms (fewer recordings) | finger 0.201 ms, any hand shape 0.208 ms |
-| CPU / memory | 4.3 % / 383 -> 365 MB | 3.9 % / 381 -> 375 MB |
-| UI stalls | none in 6 min | 2 (startup 524 ms; 185 ms machine-wide pause) |
+| Run (automated) | fps capture/processing | Latency | CPU | Memory |
+|---|---|---|---|---|
+| Developer, 30 min, hand in view 56 % | 30.1 / 30.1 | 15.3 ms | 4.6 % | 389 -> 367 MB |
+| Broadcast + transparency + face/eye models, 10 min | 30.9 / 29.7 | 12.0 ms | 4.6 % | 440 -> 430 MB |
+| Background, 5 min | 30.8 / 29.6 | 11.9 ms | 2.7 % | 387 -> 342 MB |
+| Mode cycling every 20 s, 10 min (29 transitions, 0 violations) | 30.9 / 29.7 | 12.2 ms | 3.8 % | 426 -> 420 MB |
 
 ## Director validation
 
 Nothing in Briefs 002-004 has been verified by the Director yet (M1 was). Start with
-[BRIEF_006_VALIDATION.md](docs/milestones/BRIEF_006_VALIDATION.md) (about 15 minutes); the older
+[BRIEF_007_VALIDATION.md](docs/milestones/BRIEF_007_VALIDATION.md) (about 20 minutes); the older
 [checklist](docs/milestones/DIRECTOR_ACCEPTANCE_CHECKLIST.md) covers the remaining Brief 003
 features (OBS, co-op on two PCs, packaging on a second PC).
 
@@ -103,12 +122,24 @@ features (OBS, co-op on two PCs, packaging on a second PC).
 
 | Severity | Issue |
 |---|---|
-| High (verification) | All gesture numbers come from one person's recordings, all now used for development |
-| High | Whole-hand swipes need a brief pause before the movement; rhythmic swipes without a pause and the raise before a downward whole-hand swipe are not handled reliably |
-| Medium | Any hand shape roughly doubles accidental swipes in ordinary activity compared with pointing finger only |
-| Medium | Below ~20 fps or with frame loss a missed upward flick can produce a downward swipe |
-| Medium | Stop pose unreliable at arm's length; YouTube markup changes would make Shorts actions fail |
-| Low | Rare UI stalls inside Qt (instrumented); packaged build unsigned |
+| High (verification) | No human check yet of the new UI, Broadcast presentation or transparency with a real person; gesture data from one person |
+| Medium | Real YouTube navigation fails intermittently in fresh browser profiles (YouTube-side; reported as failed) |
+| Medium | About 3 % of frames dropped while the main window is hidden (cause unknown) |
+| Medium | OBS Window Capture (Windows Graphics Capture) unverified; BitBlt window capture shows black; second monitor untested; Chrome manual only |
+| Medium | Any hand shape: about twice the accidental swipes of pointing finger only; low-fps flick returns |
+| Low | Rare Qt stalls (344 ms once in 30 min); packaged build unsigned |
+
+## Commits for Engineering Brief 007
+
+```
+ebdc193 test(gestures): freeze the 0.6.0b1 recognition baseline and add a regression gate
+c4fe51e feat(ui): clearer status, wording and layout; Broadcast Mode positioning and status
+11085ea feat(broadcast): keep low-confidence clothing inside the person in the transparent overlay
+2a7f749 test: stability sessions in Broadcast and Background Mode, with optional models and mode cycling
+e97294e feat(ui): first-use guide, extension setup without broken paths, guides and capture check
+```
+
+Followed by the documentation commit (audit 009, performance, validation, version 0.7.0b1).
 
 ## Commits for Engineering Brief 006
 
@@ -160,8 +191,7 @@ Followed by the audit/status documentation commit.
 
 ## Recommended next steps
 
-1. Director: [BRIEF_006_VALIDATION.md](docs/milestones/BRIEF_006_VALIDATION.md) - downward
-   swipes in different ways, accidental swipes with any hand shape vs pointing finger only.
-2. A new recording with each hand (`record_gestures.py --session 5`): the only possible
-   independent test data now.
-3. Signed-in like test by the Director.
+1. Director: [BRIEF_007_VALIDATION.md](docs/milestones/BRIEF_007_VALIDATION.md) (and answer or
+   cancel the open Windows Firewall prompt for OBS Studio, if still shown).
+2. A recording with OBS using Broadcast Mode and the transparent background with a real person.
+3. A held-out gesture recording with each hand (all existing ones were used for development).

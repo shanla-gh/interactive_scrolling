@@ -28,5 +28,5 @@ def test_guide_explains_stopping_and_the_extension_folder(qtbot) -> None:
     qtbot.addWidget(dialog)
     texts = " ".join(label.text() for label in dialog.findChildren(QLabel))
     assert "Ctrl+Alt+Space" in texts and "Stop control" in texts
-    assert str(EXTENSION_DIR) in texts
+    assert EXTENSION_DIR.name in texts
     assert "next Short" in texts and "previous Short" in texts

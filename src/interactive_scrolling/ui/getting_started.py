@@ -61,7 +61,8 @@ class GettingStartedDialog(QDialog):
             (
                 "2  Connect the browser",
                 "Microsoft Edge (or Chrome): open edge://extensions, switch on Developer mode, "
-                f"choose Load unpacked and select the folder {EXTENSION_DIR}. Click the extension "
+                f"choose Load unpacked and select the folder {EXTENSION_DIR.name} (the Browser tab "
+                "copies its full path). Click the extension "
                 "icon and paste the pairing code. The Browser tab shows when it is connected.",
                 "Copy pairing code",
                 None,
