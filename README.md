@@ -4,7 +4,7 @@ Hands-free YouTube Shorts and browser control with ordinary laptop webcam gestur
 playful computer-vision effects, simple personal usage reports and a two-person co-op mode.
 Free and open source. All camera processing runs locally on your computer.
 
-> **Status: beta 0.4.0b1 (not a stable release).** Everything below is implemented and
+> **Status: beta 0.5.0b1 (not a stable release).** Everything below is implemented and
 > covered by automated tests; gesture recognition was reworked after the Director's first
 > real-world test, and the Director's validation (real gestures, signed-in browser, two
 > computers for co-op) is still pending. See [PROJECT_STATUS.md](PROJECT_STATUS.md) for what is
@@ -16,7 +16,7 @@ Free and open source. All camera processing runs locally on your computer.
 
 | Gesture | Default action |
 |---|---|
-| Move the pointing finger up / down (flick, wrist or hand) | Next / previous YouTube Short |
+| Move the pointing finger up / down (flick, wrist or hand) - or a fist (experimental) | Next / previous YouTube Short |
 | Move the pointing finger to your right / left | Next / previous tab of the active browser window |
 | Half-heart (one half of a two-handed heart), held | Like the Short |
 | Open palm, held | Pause / resume |

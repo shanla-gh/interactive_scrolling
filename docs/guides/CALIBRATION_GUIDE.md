@@ -24,16 +24,27 @@ between them.
    * "Movement too short: move a little further."
    * "Hold the heart shape: thumb pointing down below the curved index finger, with a gap."
    Press **Repeat** to redo that gesture or **Skip** to keep the standard for it.
-4. The summary lists what would change, e.g. "Vertical swipes: distance 0.77 hand lengths
-   (your swipes 0.85-1.18)". Nothing changes until you press **Use my profile**.
+4. The summary lists what would change, e.g. "Finger down: distance 0.79 hand lengths
+   (your swipes 1.11-1.18)". Nothing changes until you press **Use my profile**.
 5. **Redo up / down / ... / stop** recalibrates a single gesture. **Restore standard
    recognition** goes back to the Balanced preset (your gesture-to-action mapping and hand
    choice are kept).
 
+## Version 0.5 changes
+
+* **Repaired:** in version 0.4 a pause at the end of a swipe followed by a slow return could
+  make calibration *raise* the swipe distance far too much (the Director's profile went from
+  0.8 to 1.34 hand lengths and swipes became much harder). Such profiles are reset to the
+  standard distance and speed on the first start of 0.5 (a banner says so); please calibrate
+  again.
+* Each direction now gets its own distance (up, down, left, right), and choosing **Fist swipes**
+  on the start page calibrates fist swipes (the centre of the closed hand is measured).
+* A distance is never raised by more than 15 %, and the speed is never raised.
+
 ## What is changed, and the limits
 
-* Swipe distance for up/down and for left/right separately, minimum swipe speed, and the
-  allowed swipe duration. The distance is lowered for small movements and raised only as far
+* Swipe distance per direction (and for fist swipes), minimum swipe speed (only lowered), and
+  the allowed swipe duration. The distance is lowered for small movements and raised only as far
   as your own wind-ups require - so calibrating with large swipes does not make later small ones
   fail. It never goes below 0.5 or above 1.4 hand lengths.
 * Your own half-heart shape (measured angles and distances) is added: poses close to it are

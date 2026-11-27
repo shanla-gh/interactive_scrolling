@@ -31,6 +31,14 @@ movement of the hand all work. Then let the hand come back; the movement back is
 * To go back the other way (for example next, then previous), let your hand come back to where
   it started and pause for a moment before the opposite swipe.
 
+**Fist swipes (experimental, version 0.5).** Instead of pointing you can close your hand
+into a fist, hold it still for a moment (a quarter of a second is enough), then move it a
+little up, down, left or right - a turn of the wrist works. Switch them on in **Gesture
+settings -> Swipe with -> Finger or fist**, or try them first in **Practice -> Swipe method: Fist
+swipes**. A fist that is just held still, or a hand that opens and closes in place, does
+nothing. Fist swipes are not yet verified on real recordings; please compare them with
+finger swipes and tell us which feels better.
+
 **Half-heart.** One half of the heart you would make with two hands: hand upright, index
 finger (or all fingers) curved over with the tip pointing down, thumb pointing down below it,
 a gap between thumb and fingertip. Hold it still for half a second. Holding it longer does not
@@ -51,6 +59,8 @@ The video shows a short state line and banners:
 | HALF HEART DETECTED - HOLD | Keep holding the pose |
 | SWIPE UP (green banner) | Gesture recognized |
 | ✓ Next Short / ✗ Next Short: reason | The browser result, confirmed from the page |
+| ✗ Previous Short: already at the first Short (gesture recognized ...) | Your gesture worked; the feed is at its start, so there is nothing to go back to |
+| Arrow with "FINGER DOWN 0.52/0.80" | The movement being measured: start point, current position, travel against what is needed |
 | Hand far from the camera ... | Move your hand closer |
 | Low camera frame rate ... | More light helps; use hand movements rather than finger flicks |
 

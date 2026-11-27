@@ -46,11 +46,13 @@ Eye and face tracking never control anything.
 | **M10** Minimal Co-op Doomscroll | Two-person host/guest gesture control of one Shorts feed over a private LAN session | Brief 003 |
 | **M11** Packaging & Release Candidate | Windows distribution, setup guide, clean-environment validation | Brief 003 |
 | **Beta stabilization** (Brief 004) | Root-cause analysis of the Director's test, gesture engine rework, diagnostics, Practice and Quick Calibration, browser reliability, benchmark and Audit 006 | Implemented; Director beta validation pending |
+| **Motion-first gestures** (Brief 005, M12-M18) | Shared motion engine, fist swipes (experimental), downward-motion analysis, per-direction calibration, motion visualization | Implemented; fist control and downward comfort need the Director's validation and session-5 recordings |
 
-Integration audits follow M4 (003), M6 (004), M10 (005) and the beta stabilization (006).
+Integration audits follow M4 (003), M6 (004), M10 (005), the beta stabilization (006) and the motion-first work (007).
 
-**Next (needs the Director):** beta validation (`docs/milestones/BRIEF_004_VALIDATION.md`) and
-the session-4 recordings with each hand; then tuning of left/right swipes, the half-heart and
+**Next (needs the Director):** beta validation (`docs/milestones/BRIEF_005_VALIDATION.md`) and
+the session-5 recordings with each hand (about 3 minutes each); a decision on finger vs fist
+control; then tuning of left/right swipes, the half-heart and
 the stop pose on real data, and the 30-minute false-trigger measurement. No new features until
 the core interaction is accepted. Status of each checkpoint is
 tracked in [PROJECT_STATUS.md](PROJECT_STATUS.md).

@@ -7,7 +7,8 @@ for every rejection, the measured and the required value.
 
 Version 0.3 (Brief 003) introduced one four-direction index-finger gesture family and the
 single-hand half-heart. Version 0.4 (Brief 004) reworked the recognizer after the Director's
-real-world test; the measurements behind every decision are in
+real-world test; version 0.5 (Brief 005) made it a motion engine with finger and fist detectors
+([benchmark 005](../benchmarks/GESTURE_BENCHMARK_005.md)); the measurements behind every decision are in
 [GESTURE_BENCHMARK_004.md](../benchmarks/GESTURE_BENCHMARK_004.md). User-facing guides:
 [gestures](../guides/GESTURE_GUIDE.md), [calibration](../guides/CALIBRATION_GUIDE.md).
 
@@ -100,6 +101,44 @@ and rejected (natural pauses between stroke and return are 0.2-0.37 s).
 
 **Tracking dropouts.** Gaps of up to 0.2 s (fast movements blur) keep the current candidate.
 
+### Motion-first engine (Brief 005)
+
+All swipes run through one motion engine (`DirectionalSwipeRecognizer`) with three detector
+configurations; they share stroke segmentation, direction scoring and the return memory:
+
+| Detector | Motion reference | Activation (intent gating) | Default |
+|---|---|---|---|
+| finger | index fingertip | pointing at the threshold (and during half the stroke or held before it); a curl flick from a held pointing pose waits for the finger to recover; confirmed at once when the palm moves with the fingertip (>= 40 % of its travel) | on |
+| fist | palm centre = mean of wrist and the four knuckles | a fist (pose FIST) held in >= 70 % of the frames of the 0.45 s before the stroke, spanning >= 0.25 s, and the palm still (drift <= 0.25 hand lengths) for 0.25 s right before it; fist-shaped strokes without that cue are followed silently and remembered so their returns cannot fire | experimental (style "fist" or "finger or fist") |
+| palm | palm centre | an open hand held still before the stroke | experimental, off (rejected on real sweeps) |
+
+**Why the palm centre for fists.** Opening or closing the hand moves the fingertips but hardly
+the knuckles and wrist, so the palm centre does not report pose changes as motion; up and down
+are symmetric whole-hand or wrist movements without finger flexion. The fingertip is kept for
+the finger detector because small finger and wrist movements move it most.
+
+**Directional score** (all detectors; heuristic, not a probability). From the stroke's start
+(the last rest of the reference) the displacement `d` is measured in hand lengths in user space
+(x = the user's right, y = down; the camera image is not mirrored). The direction is the
+dominant axis of the velocity when the stroke starts. Along that axis: `d_axis` = displacement,
+`peak` = highest axis speed, `d_cross` = displacement across it. The stroke is confirmed when
+`d_axis >= distance(direction, detector)`, `peak >= 2.0` hand lengths/s, `d_axis >= 1.8 x d_cross`
+(within ~29 degrees; diagonals are rejected) and the time since the start is <= 0.7 s. A reversal
+(speed >= 0.8 the other way) starts the opposite stroke from the turning point. The progress
+shown is `d_axis / distance`.
+
+**One physical gesture, one event.** When any detector confirms, the other detectors are
+blocked for the global cooldown and adopt the swipe (its start is looked up in their own
+reference's position history), so its return is suppressed in all of them.
+
+**Leaving the picture.** A downward stroke whose lowest hand landmark is below 85 % of the image
+height is confirmed only once the hand stops inside the view (a hand lowered out of view was
+read as a swipe down; real downward swipes ended at 62-74 %).
+
+**Measured asymmetry.** A downward finger flick and the curl back after an upward flick are the
+same movement (finger flexion +113 vs +137 degrees, palm ~0); smaller downward distances turned
+those returns into false downward swipes. See the Brief 005 benchmark.
+
 ### Half-heart
 
 One half of the two-handed heart with one upright hand: index finger curved over with its tip
@@ -170,6 +209,10 @@ The recognition strategies themselves are `RecognizerOptions` (`V03_OPTIONS` rep
 version 0.3 for the benchmark).
 
 ## Known limitations
+
+* Fist control has no real recording; its numbers are semi-synthetic (Brief 005 benchmark).
+* Finger curl flicks downwards remain ambiguous with the return of an upward flick; they wait
+  for the finger to recover (moving the hand or wrist down is confirmed at once).
 
 * Left/right swipes, the half-heart and the stop pose at a normal distance have no real
   recordings yet; their evidence is synthetic or a proxy (benchmark report).

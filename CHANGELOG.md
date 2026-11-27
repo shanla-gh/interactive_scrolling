@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0b1] - beta (not released; Director validation pending)
+
+Engineering Brief 005: motion-first gesture recognition. Evidence:
+`docs/benchmarks/GESTURE_BENCHMARK_005.md`.
+
+### Fixed
+
+- Quick Calibration could raise the swipe distance far too much when a swipe was held before a
+  slow return (the Director's profile: 1.34 instead of 0.8 hand lengths and a higher speed;
+  recorded finger flicks 8/8 -> 0/8). Profiles from 0.4 are repaired once with a notice.
+- Lowering a pointing hand out of the picture could be read as a downward swipe.
+- A fist swipe's own return could suppress the next fist swipe (found by new scenario tests
+  before release).
+
+### Added
+
+- One motion engine for finger, fist and (experimental) open-palm swipes; fist swipes follow
+  the palm centre and are activated by a fist held still for a moment. "Swipe with": index
+  finger (default), finger or fist, fist only (both experimental). One physical swipe gives one
+  action; returns are suppressed across detectors.
+- Practice and Quick Calibration for finger or fist swipes; per-direction personal distances
+  and a fist distance.
+- The video shows the measured stroke (start, arrow, travel against the needed distance,
+  detector, phase); recognized gestures name their detector.
+- Meaningful gesture rejections are stored locally (no images) and included in the
+  diagnostics export.
+- Recorder session 5 (about 3 minutes per hand) for the open questions; strategy comparison,
+  motion-reference analysis and semi-synthetic fist evaluation tools.
+
+### Changed
+
+- A finger stroke whose palm moves with the fingertip is confirmed at once even if blur makes
+  the finger look curled.
+- Boundary refusals ("already at the first Short") say that the gesture was recognized.
+
 ## [0.4.0b1] - beta (not released; Director validation pending)
 
 Engineering Brief 004: beta stabilization of gesture recognition and browser reliability,

@@ -287,3 +287,42 @@ Each record states the decision, the alternatives considered and the trade-offs.
   and lost 4 fast flicks. Image-space finger states raised false open-palm frames while typing
   from 0 to 116 and false pointing frames in natural movement from 25 to 76-79, without a stop
   recall gain.
+
+## ADR-031 One motion engine with finger, fist and palm detectors (Brief 005)
+
+* **Decision**: the swipe recognizer is shared; detectors differ in the motion reference
+  (fingertip / palm centre) and the activation cue; one physical swipe gives one event and its
+  return is suppressed in all detectors (adopt).
+* **Why**: the downward finger flick is physically the return of an upward flick (index curl,
+  palm still); a palm-centre reference has no finger flexion, and opening or closing the hand
+  hardly moves it.
+
+## ADR-032 Fist activation: a still fist before the movement; finger stays the default
+
+* **Decision**: a fist swipe needs the fist held still for 0.25 s first; fist-shaped strokes
+  without that cue are followed and remembered so their returns cannot fire. Default control
+  style: finger; fist and finger-or-fist are experimental.
+* **Evidence**: without the cue the hybrid style added 4-5 false events in 190 s of real
+  negatives; with it 2 (both while thumbs-ups were lowered). Semi-synthetic fist recall 18/20.
+  No real fist recording exists.
+
+## ADR-033 Open-palm swipes rejected
+
+* **Evidence**: on the real recorded open-hand sweeps every palm event went the opposite way
+  (0/12 correct): the still-hand cue matches the pause at the end of a sweep, so the return is
+  activated. Two more events came from raising an open hand. The stop pose keeps the open palm.
+
+## ADR-034 Calibration: per direction, floors from wind-ups only, never stricter by much
+
+* **Decision**: per-direction finger distances and a fist distance; floors from wind-ups of the
+  direction and of the opposite one; at most +15 %; speed never raised; v0.4 profiles repaired.
+* **Why**: the Director's 0.4 profile (1.34 / 2.5) made recorded flicks fail 8/8 -> 0/8; returns
+  as floors made small flicks fail after calibrating on whole-hand swipes (0/8).
+
+## ADR-035 Leaving the picture; boundary feedback; stored rejections
+
+* **Decision**: downward strokes in the bottom 15 % of the image confirm only once the hand stops
+  in view; boundary refusals say the gesture was recognized; meaningful rejections are stored
+  locally (no images, at most 60 per minute).
+* **Why**: one recorded false swipe from lowering the hand; 7 of 13 of the Director's downward
+  swipes were boundary refusals that looked like failures; missed attempts were invisible.
