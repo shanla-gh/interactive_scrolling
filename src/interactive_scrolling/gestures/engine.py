@@ -107,6 +107,10 @@ class GestureEngine:
         self._frame_times: deque[int] = deque(maxlen=31)
         self.ghost_frames = 0
         """Frames in which a duplicate detection of the control hand was ignored."""
+        self._intervals: deque[float] = deque(maxlen=900)
+        """Recent frame intervals in ms (about 30 s at 30 fps), for the diagnostics."""
+        self.frames_seen = 0
+        self.frames_with_control_hand = 0
 
     @property
     def settings(self) -> GestureSettings:
@@ -167,6 +171,26 @@ class GestureEngine:
     def set_profile(self, profile: CalibrationProfile | None) -> None:
         """Personal calibration results (thread-safe enough: one reference assignment)."""
         self.profile = profile
+
+    def tracking_quality(self) -> dict:
+        """Measured frame timing and tracking statistics for the diagnostics export."""
+        intervals = sorted(self._intervals)
+        out: dict = {
+            "frames": self.frames_seen,
+            "frames_with_control_hand": self.frames_with_control_hand,
+            "duplicate_hand_frames_ignored": self.ghost_frames,
+            "frame_rate": round(self.frame_rate() or 0.0, 1),
+        }
+        if intervals:
+            n = len(intervals)
+            out["frame_interval_ms"] = {
+                "median": round(intervals[n // 2], 1),
+                "p95": round(intervals[min(n - 1, int(0.95 * n))], 1),
+                "max": round(intervals[-1], 1),
+                "share_over_50ms": round(sum(i > 50 for i in intervals) / n, 3),
+                "share_over_100ms": round(sum(i > 100 for i in intervals) / n, 3),
+            }
+        return out
 
     def frame_rate(self) -> float | None:
         """Frames per second over the last second of frames (``None`` until known)."""
@@ -309,7 +333,10 @@ class GestureEngine:
             self._apply_enabled()
 
         ts = tracking.timestamp_ns
+        if self._frame_times:
+            self._intervals.append((ts - self._frame_times[-1]) / 1e6)
         self._frame_times.append(ts)
+        self.frames_seen += 1
         self._observe_labels(tracking, motion)
         hand, status, detail = self._select(tracking, motion)
         rejection: GestureRejection | None = None
@@ -349,6 +376,7 @@ class GestureEngine:
         handedness = self.handedness_of(hand.track_id)
 
         self._last_seen_ns = ts
+        self.frames_with_control_hand += 1
         observation = tracking.hands[hand.observation_index]
         pose = analyze_pose(observation, tracking.image_width, tracking.image_height)
         hint = positioning_hint(pose.scale_px, observation, tracking.image_width)

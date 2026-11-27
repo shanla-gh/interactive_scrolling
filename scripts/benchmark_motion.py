@@ -167,6 +167,44 @@ def score(
             )
 
 
+def degrade(frames: list[dict], how: str, seed: int = 6) -> list[dict]:
+    """Synthetic degradations of a real recording (engineering checks, not physical evidence):
+    ``fps15`` / ``fps20`` keep every 2nd / 2 of 3 frames, ``drop10`` loses 10 % of the frames at
+    random, ``jitter`` adds +-8 ms of timestamp noise (the measured delivery jitter is 5 ms sd),
+    ``blur`` removes the hand from 15 % of the frames of fast movement (landmark dropouts)."""
+    import random
+
+    rng = random.Random(seed)
+    if how == "fps15":
+        return frames[::2]
+    if how == "fps20":
+        return [f for i, f in enumerate(frames) if i % 3 != 2]
+    if how == "drop10":
+        return [f for f in frames if rng.random() >= 0.1]
+    if how == "jitter":
+        out, last = [], 0
+        for f in frames:
+            t = f["t_ns"] + int(rng.uniform(-8e6, 8e6))
+            t = max(t, last + 1_000_000)
+            last = t
+            out.append({**f, "t_ns": t})
+        return out
+    if how == "blur":
+        import numpy as np
+
+        out, prev = [], None
+        for f in frames:
+            fast = False
+            if f["hands"] and prev is not None and prev["hands"]:
+                a = np.asarray(f["hands"][0]["lm"])[0, :2]
+                b = np.asarray(prev["hands"][0]["lm"])[0, :2]
+                fast = float(np.hypot(*(a - b))) > 0.012
+            prev = f
+            out.append({**f, "hands": []} if fast and rng.random() < 0.15 else f)
+        return out
+    raise ValueError(how)
+
+
 def show(title: str, table: Table) -> dict:
     print(f"== {title}")
     out: dict = {"rows": {}, "negatives": {}}
@@ -215,6 +253,11 @@ def main() -> int:
         help="score the v0.2 open-hand sweeps as negatives (Brief 005) instead of as horizontal "
         "swipes (Brief 006: the hand shape does not matter)",
     )
+    parser.add_argument(
+        "--degrade",
+        choices=["fps15", "fps20", "drop10", "jitter", "blur"],
+        help="score SYNTHETIC degradations of the development recordings",
+    )
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
 
@@ -243,6 +286,8 @@ def main() -> int:
     for path in args.recordings:
         frames = load(path)
         held = any(fnmatch.fnmatch(path.name, pattern) for pattern in args.holdout)
+        if args.degrade:
+            frames = degrade(frames, args.degrade)
         score(
             frames,
             settings,

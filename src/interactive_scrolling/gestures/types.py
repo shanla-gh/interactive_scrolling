@@ -201,6 +201,9 @@ class MotionTrace:
     phase: str
     """``moving``, ``return`` (the hand coming back), ``blocked`` (cooldown / not armed /
     not activated) or ``waiting`` (flick waiting for the finger, hand near the bottom)."""
+    path_px: tuple[tuple[float, float], ...] = ()
+    """The reference's observed positions since the stroke started (source pixels): the
+    trajectory the decision is based on, without interpolation across tracking gaps."""
 
 
 @dataclass(frozen=True, slots=True)

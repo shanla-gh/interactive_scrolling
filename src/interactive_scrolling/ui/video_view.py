@@ -188,6 +188,13 @@ class VideoView(QWidget):
             "blocked": palette.TEXT_MUTED,
         }
         color = QColor(colors.get(motion.phase, palette.TEXT_MUTED))
+        if len(motion.path_px) >= 2:
+            # The observed trajectory of the reference (no interpolation across gaps).
+            trail = QColor(color)
+            trail.setAlpha(140)
+            painter.setPen(QPen(trail, 2))
+            points = [QPointF(*t.map_source_px(*p)) for p in motion.path_px]
+            painter.drawPolyline(points)
         sx, sy = t.map_source_px(*motion.start_px)
         cx, cy = t.map_source_px(*motion.reference_px)
         painter.setPen(QPen(color, 3))

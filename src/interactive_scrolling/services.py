@@ -194,6 +194,7 @@ class ControlServices:
             "browser": browser,
             "performance": performance or {},
             "recognition": self.diagnostics.snapshot(),
+            "tracking_quality": self.engine.tracking_quality(),
             "stored_rejections_7_days": self.analytics.rejection_summary(
                 self.wall_clock() - 7 * 86400
             )

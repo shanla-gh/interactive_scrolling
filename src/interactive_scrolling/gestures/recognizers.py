@@ -542,7 +542,9 @@ class DirectionalSwipeRecognizer:
             phase = "blocked"
         else:
             phase = "moving"
+        path = tuple(p for t, p in self._positions if t >= stroke.start_ns)[-30:]
         return MotionTrace(
+            path_px=path,
             detector=self.detector.name,
             gesture=stroke.gesture,
             reference_px=position,

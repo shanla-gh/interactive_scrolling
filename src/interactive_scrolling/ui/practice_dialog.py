@@ -465,6 +465,11 @@ class PracticeDialog(QDialog):
             return False
         if not gesture.is_dynamic:
             return True
+        own_style = (self._restore_settings or self.services.engine.settings).control_style
+        if self.mode == "practice" and own_style == "motion":
+            # The user's setting is "any hand shape": the direction is practised, not a pose
+            # (Brief 006). A finger-only user practising whole-hand swipes is told the method.
+            return True
         made = record.event.detector or "finger"
         if detector == "fist":
             return made in ("fist", "hand")

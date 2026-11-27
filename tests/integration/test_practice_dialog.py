@@ -174,3 +174,20 @@ def test_whole_hand_practice_enables_hand_swipes_only_for_the_window(qtbot, tmp_
         MotionAnalyzer().update(TrackingResult(0, 2, 1280, 720, ())),
     )
     assert services.engine.settings.control_style == "finger"
+
+
+def test_any_hand_shape_practice_accepts_the_direction_however_the_hand_is_shaped(
+    qtbot, tmp_path
+) -> None:
+    """Brief 006: with the default "any hand shape", Practice does not force a pose."""
+    dialog, services = make(qtbot, tmp_path)
+    assert services.engine.settings.control_style == "motion"
+    dialog.method_box.setCurrentIndex(dialog.method_box.findData("finger"))
+    dialog.start("practice")
+    for detector in ("hand", "finger"):
+        event = GestureEvent(
+            G.INDEX_SWIPE_UP, time.perf_counter_ns(), 1, Handedness.RIGHT, detector=detector
+        )
+        services.dispatcher.submit(event)
+    qtbot.waitUntil(lambda: dialog.successes == 2, timeout=2000)
+    dialog.close()
