@@ -185,7 +185,7 @@ def test_daily_report_from_recorded_activity(tmp_path) -> None:
     at(105, K.GESTURE_CONFIRMED, gesture="half_heart")
     at(106, K.ACTION_RESULT, action="like_short", outcome="no change")
     at(107, K.ACTION_RESULT, action="next_short", outcome="rejected")
-    store.flush()
+    assert store.flush(timeout_s=30), "analytics writer did not finish in time"
     clock.now = noon() + 6000
     report = daily_report(store, daily_budget_min=60, session_limit_min=20)
     assert report is not None
@@ -210,7 +210,7 @@ def test_abnormal_shutdown_counts_until_the_last_heartbeat(tmp_path) -> None:
     crashed.record(K.SCROLL_HEARTBEAT)
     clock.now = noon() + 60
     crashed.record(K.SCROLL_HEARTBEAT)  # last sign of life, then the process died
-    crashed.flush()
+    assert crashed.flush(timeout_s=30), "analytics writer did not finish in time"
     clock.now = noon() + 3600
     restarted = store_at(tmp_path, clock)
     report = daily_report(restarted, 60, 20)
@@ -226,7 +226,7 @@ def test_session_across_midnight_is_split_between_days(tmp_path) -> None:
     store.record(K.SCROLL_ACTIVE_STARTED)
     clock.now = late + 600  # 00:05 next day
     store.record(K.SCROLL_ACTIVE_ENDED)
-    store.flush()
+    assert store.flush(timeout_s=30), "analytics writer did not finish in time"
     first = daily_report(store, 60, 20, day=datetime.fromtimestamp(late).date())
     second = daily_report(
         store, 60, 20, day=(datetime.fromtimestamp(late) + timedelta(days=1)).date()
@@ -254,7 +254,7 @@ def test_performance_report_uses_dispatched_actions_as_denominator(tmp_path) -> 
         )
     store.record(K.GESTURE_CONFIRMED, gesture="index_swipe_up")
     store.record(K.ACTION_RESULT, action="previous_short", outcome="not executed")
-    store.flush()
+    assert store.flush(timeout_s=30), "analytics writer did not finish in time"
     perf = performance_report(store)
     assert perf.dispatched == 4 and perf.succeeded == 2
     assert perf.success_rate == pytest.approx(0.5)
