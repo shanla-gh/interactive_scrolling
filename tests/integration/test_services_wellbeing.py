@@ -118,7 +118,7 @@ def test_reaching_the_limit_pauses_only_gesture_scrolling_and_the_user_can_resum
     assert wait_until(lambda: ActionType.LIKE_SHORT in browser.executed)
     assert liked.status is ActionStatus.QUEUED
     services.pause_scrolling(False)
-    assert wait_until(lambda: not dispatcher._busy)
+    assert wait_until(lambda: not dispatcher.busy)
     accepted = dispatcher.submit(event(GestureType.INDEX_SWIPE_UP))
     assert accepted.status is ActionStatus.QUEUED
     assert wait_until(lambda: ActionType.NEXT_SHORT in browser.executed)

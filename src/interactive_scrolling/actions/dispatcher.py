@@ -47,6 +47,9 @@ AdmissionCheck = Callable[[ActionRecord], str | None]
 """Returns a reason to refuse the action, or ``None`` (wellbeing pause, co-op arbitration)."""
 ModeListener = Callable[[ControlMode, ControlMode, str], None]
 
+QUEUED_MAX_AGE_S = 2.5
+"""A gesture made while the previous action was still running waits for it (at most one
+gesture waits); it is dropped if its turn comes later than this after the gesture."""
 TRANSIENT_WAIT_S = 1.2
 """Longest wait for a transient controller state (a Short changing or loading)."""
 TRANSIENT_POLL_S = 0.03
@@ -75,8 +78,9 @@ class ActionDispatcher:
         self._lock = threading.RLock()
         self._mode = ControlMode.TRACKING_ONLY
         self._generation = 0
-        self._busy = False
-        self._queue: queue.Queue[tuple[ActionRecord, int] | None] = queue.Queue(maxsize=1)
+        self._pending = 0
+        """Actions accepted but not finished: one running and at most one waiting."""
+        self._queue: queue.Queue[tuple[ActionRecord, int] | None] = queue.Queue(maxsize=2)
         self._record_listeners: list[RecordListener] = []
         self._mode_listeners: list[ModeListener] = []
         self._admission: list[AdmissionCheck] = []
@@ -85,6 +89,12 @@ class ActionDispatcher:
         self._worker.start()
 
     # ------------------------------------------------------------------ configuration
+
+    @property
+    def busy(self) -> bool:
+        """An action is running or waiting."""
+        with self._lock:
+            return self._pending > 0
 
     def add_record_listener(self, listener: RecordListener) -> None:
         self._record_listeners.append(listener)
@@ -203,13 +213,17 @@ class ActionDispatcher:
             if refusal:
                 return self._finish(record, ActionStatus.REJECTED, refusal)
         with self._lock:
-            if self._busy:
-                return self._finish(record, ActionStatus.REJECTED, "previous action still running")
+            if self._pending >= 2:
+                return self._finish(record, ActionStatus.REJECTED, "previous action still queued")
+            if self._pending == 1:
+                # Quick repeated gestures (next, next): this one runs right after the current
+                # action instead of being refused; a third one is refused.
+                record = replace(record, extra={**record.extra, "queued": "behind running action"})
             try:
                 self._queue.put_nowait((record, generation))
             except queue.Full:
                 return self._finish(record, ActionStatus.REJECTED, "previous action still queued")
-            self._busy = True
+            self._pending += 1
         self._emit(record)
         return record
 
@@ -228,7 +242,7 @@ class ActionDispatcher:
                 self._finish(record, ActionStatus.FAILED, f"internal error: {exc}")
             finally:
                 with self._lock:
-                    self._busy = False
+                    self._pending = max(0, self._pending - 1)
 
     def _execute(self, record: ActionRecord, generation: int) -> None:
         controller = self._controller
@@ -240,7 +254,10 @@ class ActionDispatcher:
             self._finish(record, ActionStatus.REJECTED, "live control was disabled")
             return
         age = self._clock() - record.event.timestamp_ns
-        if age > self._max_age_ns:
+        limit = self._max_age_ns
+        if "queued" in record.extra:
+            limit = max(limit, int(QUEUED_MAX_AGE_S * NS_PER_S))
+        if age > limit:
             self._finish(record, ActionStatus.REJECTED, f"stale gesture ({age / 1e6:.0f} ms old)")
             return
         check = controller.check(record.action)
@@ -291,7 +308,7 @@ class ActionDispatcher:
             except queue.Empty:
                 return
             if item is not None:
-                self._busy = False
+                self._pending = max(0, self._pending - 1)
                 self._finish(item[0], ActionStatus.REJECTED, reason)
 
     def _emit(self, record: ActionRecord) -> None:

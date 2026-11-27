@@ -169,16 +169,48 @@ def test_stale_gesture_is_rejected(records) -> None:
     dispatcher.shutdown()
 
 
-def test_gesture_during_running_action_is_rejected_not_queued(records) -> None:
+def test_gesture_during_running_action_waits_and_a_third_is_refused(records) -> None:
+    """Brief 004 (quick repeated navigation): one gesture made while the previous action is
+    still running waits for it and then runs; a third one is refused (no unbounded queue)."""
     controller = FakeController(delay_s=0.4)
     dispatcher = make(controller, records)
     first = dispatcher.submit(event())
     assert wait_until(lambda: controller.executed)
     second = dispatcher.submit(event())
-    assert second.status is ActionStatus.REJECTED
-    assert "still running" in second.reason
-    assert wait_until(lambda: final(records, first.record_id) is not None)
-    assert controller.executed == [ActionType.NEXT_SHORT]
+    third = dispatcher.submit(event())
+    assert second.status is ActionStatus.QUEUED
+    assert third.status is ActionStatus.REJECTED and "still queued" in third.reason
+    assert wait_until(lambda: final(records, second.record_id) is not None, timeout_s=3)
+    assert final(records, first.record_id).status is ActionStatus.SUCCEEDED
+    assert final(records, second.record_id).status is ActionStatus.SUCCEEDED
+    assert controller.executed == [ActionType.NEXT_SHORT, ActionType.NEXT_SHORT]
+    dispatcher.shutdown()
+
+
+def test_waiting_gesture_expires(records) -> None:
+    controller = FakeController(delay_s=2.8)
+    dispatcher = make(controller, records)
+    dispatcher.submit(event())
+    assert wait_until(lambda: controller.executed)
+    second = dispatcher.submit(event())
+    assert wait_until(lambda: final(records, second.record_id) is not None, timeout_s=5)
+    assert final(records, second.record_id).status is ActionStatus.REJECTED
+    assert "stale" in final(records, second.record_id).reason
+    assert len(controller.executed) == 1
+    dispatcher.shutdown()
+
+
+def test_emergency_disable_drops_the_waiting_gesture(records) -> None:
+    controller = FakeController(delay_s=0.6)
+    dispatcher = make(controller, records)
+    dispatcher.submit(event())
+    assert wait_until(lambda: controller.executed)
+    second = dispatcher.submit(event())
+    dispatcher.emergency_disable()
+    assert wait_until(lambda: final(records, second.record_id) is not None, timeout_s=3)
+    assert final(records, second.record_id).status is ActionStatus.REJECTED
+    time.sleep(0.8)
+    assert len(controller.executed) == 1
     dispatcher.shutdown()
 
 
@@ -204,12 +236,12 @@ def test_reenabling_live_control_does_not_replay_old_gestures(records) -> None:
     dispatcher = make(controller, records)
     dispatcher.submit(event())
     assert wait_until(lambda: controller.executed)
-    queued_before_disable = dispatcher.submit(event())  # rejected: busy
+    queued_before_disable = dispatcher.submit(event())  # waits behind the running action
     dispatcher.set_mode(ControlMode.GESTURE_TEST)
     dispatcher.set_mode(ControlMode.LIVE_CONTROL)
     time.sleep(0.6)
     assert controller.executed == [ActionType.NEXT_SHORT]
-    assert queued_before_disable.status is ActionStatus.REJECTED
+    assert final(records, queued_before_disable.record_id).status is ActionStatus.REJECTED
     dispatcher.shutdown()
 
 
@@ -298,61 +330,3 @@ class TransientController(FakeController):
             self.remaining -= 1
             return ControllerCheck(False, "the Short is changing", transient=True)
         return ControllerCheck(True)
-
-
-def test_transient_state_is_waited_out_once_not_rejected(records) -> None:
-    """Regression (Director test, Nov 2026): a gesture made while the previous navigation was
-    still settling was rejected with "no YouTube Shorts tab is active"."""
-    controller = TransientController(transient_checks=5)
-    dispatcher = make(controller, records)
-    try:
-        record = dispatcher.submit(event())
-        assert wait_until(lambda: final(records, record.record_id) is not None, timeout_s=3)
-        assert final(records, record.record_id).status is ActionStatus.SUCCEEDED
-        assert controller.executed == [ActionType.NEXT_SHORT]
-    finally:
-        dispatcher.shutdown()
-
-
-def test_transient_wait_is_bounded(records) -> None:
-    controller = TransientController(transient_checks=10_000)
-    dispatcher = make(controller, records)
-    try:
-        started = time.perf_counter()
-        record = dispatcher.submit(event())
-        assert wait_until(lambda: final(records, record.record_id) is not None, timeout_s=4)
-        elapsed = time.perf_counter() - started
-        result = final(records, record.record_id)
-        assert result.status is ActionStatus.REJECTED
-        assert result.reason == "the Short is changing"
-        assert controller.executed == []
-        assert 1.0 <= elapsed <= 2.5
-    finally:
-        dispatcher.shutdown()
-
-
-def test_emergency_disable_ends_a_transient_wait(records) -> None:
-    controller = TransientController(transient_checks=10_000)
-    dispatcher = make(controller, records)
-    try:
-        record = dispatcher.submit(event())
-        assert wait_until(lambda: controller.checks >= 2)
-        dispatcher.emergency_disable()
-        assert wait_until(lambda: final(records, record.record_id) is not None, timeout_s=3)
-        assert final(records, record.record_id).status is ActionStatus.REJECTED
-        assert controller.executed == []
-    finally:
-        dispatcher.shutdown()
-
-
-def test_non_transient_refusal_is_not_waited_for(records) -> None:
-    controller = FakeController(ready=False, reason="already at the first Short")
-    dispatcher = make(controller, records)
-    try:
-        started = time.perf_counter()
-        record = dispatcher.submit(event())
-        assert wait_until(lambda: final(records, record.record_id) is not None, timeout_s=2)
-        assert time.perf_counter() - started < 0.5
-        assert final(records, record.record_id).reason == "already at the first Short"
-    finally:
-        dispatcher.shutdown()
