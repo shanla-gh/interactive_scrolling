@@ -68,6 +68,11 @@ MIN_HANDEDNESS_SCORE = 0.7
 """Below this score the handedness of a hand is not trusted for LEFT/RIGHT selection."""
 MIN_HAND_SEPARATION_PALMS = 1.2
 """Two hands closer than this (palm centres) make the control hand ambiguous."""
+GHOST_MAX_AGE_S = 0.3
+"""A hand overlapping the established control hand that has been tracked for less than this
+is a duplicate detection of the same hand: during fast movements MediaPipe reports the
+blurred hand twice for 1-4 frames (about ten times per recorded session, mostly in the
+middle of a swipe). Brief 006: each such frame used to cancel the swipe."""
 HANDEDNESS_WINDOW = 15
 """Frames over which a track's handedness label is smoothed (MediaPipe's per-frame label
 flips occasionally during fast movement)."""
@@ -98,6 +103,8 @@ class GestureEngine:
         self._labels: dict[int, deque[tuple[Handedness, float | None]]] = {}
         self._last_seen_ns: int | None = None
         self._frame_times: deque[int] = deque(maxlen=31)
+        self.ghost_frames = 0
+        """Frames in which a duplicate detection of the control hand was ignored."""
 
     @property
     def settings(self) -> GestureSettings:
@@ -246,6 +253,14 @@ class GestureEngine:
         wanted = Handedness.LEFT if preference is ControlHandPreference.LEFT else Handedness.RIGHT
         return self.handedness_of(motion.track_id) is wanted
 
+    def _ghost(self, current: HandMotion, other: HandMotion) -> bool:
+        """``other`` is a momentary duplicate of the established control hand."""
+        if not self.options.ghost_hands or current.track_id != self._control_track:
+            return False
+        return (
+            other.track_duration_s < GHOST_MAX_AGE_S and current.track_duration_s >= GHOST_MAX_AGE_S
+        )
+
     def _select(
         self, tracking: TrackingResult, motion: MotionFrame
     ) -> tuple[HandMotion | None, ControlStatus, str]:
@@ -268,6 +283,9 @@ class GestureEngine:
                 continue
             distance = math.dist(other.palm.position_px, current.palm.position_px)
             if distance < MIN_HAND_SEPARATION_PALMS * current.palm_length_px:
+                if self._ghost(current, other):
+                    self.ghost_frames += 1
+                    continue
                 return None, ControlStatus.AMBIGUOUS, "hands too close together"
         return current, ControlStatus.ACTIVE, ""
 

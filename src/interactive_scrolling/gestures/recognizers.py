@@ -170,6 +170,10 @@ class RecognizerOptions:
     """``"early"``: confirm as soon as all criteria are met; ``"end"``: wait until the stroke
     stops inside the view (rejects hands leaving the picture, costs latency)."""
 
+    ghost_hands: bool = True
+    """A second hand that appears overlapping the control hand for a moment is a duplicate
+    detection of the same hand (motion blur), not a second hand (Brief 006)."""
+
     def __post_init__(self) -> None:
         if self.confirm not in ("early", "end"):
             raise ValueError(f"unknown confirmation strategy {self.confirm!r}")
@@ -186,6 +190,7 @@ class RecognizerOptions:
 
 
 V03_OPTIONS = RecognizerOptions(
+    ghost_hands=False,
     arming="still",
     pose_rule="fraction",
     scale="stroke_max",
