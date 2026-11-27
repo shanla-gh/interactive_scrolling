@@ -1,0 +1,129 @@
+{
+  "development (real)": {
+    "rows": {
+      "finger down": {
+        "expected": 18,
+        "correct": 18,
+        "wrong": 0,
+        "extra": 3,
+        "other": 0,
+        "segments": 4
+      },
+      "finger reversal down": {
+        "expected": 4,
+        "correct": 3,
+        "wrong": 0,
+        "extra": 1,
+        "other": 0,
+        "segments": 2
+      },
+      "finger reversal up": {
+        "expected": 4,
+        "correct": 4,
+        "wrong": 0,
+        "extra": 1,
+        "other": 0,
+        "segments": 2
+      },
+      "finger stop": {
+        "expected": 3,
+        "correct": 0,
+        "wrong": 0,
+        "extra": 0,
+        "other": 0,
+        "segments": 3
+      },
+      "finger up": {
+        "expected": 8,
+        "correct": 7,
+        "wrong": 1,
+        "extra": 0,
+        "other": 0,
+        "segments": 2
+      },
+      "fist down": {
+        "expected": 8,
+        "correct": 0,
+        "wrong": 1,
+        "extra": 0,
+        "other": 0,
+        "segments": 2
+      },
+      "fist left": {
+        "expected": 8,
+        "correct": 7,
+        "wrong": 0,
+        "extra": 0,
+        "other": 0,
+        "segments": 2
+      },
+      "fist right": {
+        "expected": 8,
+        "correct": 7,
+        "wrong": 0,
+        "extra": 0,
+        "other": 0,
+        "segments": 2
+      },
+      "fist up": {
+        "expected": 8,
+        "correct": 4,
+        "wrong": 0,
+        "extra": 0,
+        "other": 0,
+        "segments": 2
+      },
+      "open hand left": {
+        "expected": 6,
+        "correct": 6,
+        "wrong": 0,
+        "extra": 1,
+        "other": 0,
+        "segments": 2
+      },
+      "open hand right": {
+        "expected": 6,
+        "correct": 3,
+        "wrong": 2,
+        "extra": 0,
+        "other": 0,
+        "segments": 2
+      }
+    },
+    "negatives": {
+      "pose_pointing:right": 1,
+      "pose_thumbs_up:right": 1,
+      "neg_rest:left": 2,
+      "neg_natural:right": 1,
+      "thumbs_up_x3:left": 1,
+      "thumbs_up_x3:right": 1,
+      "neg_open_close:stop": 1,
+      "neg_lower_out_of_view:up": 2,
+      "neg_fist_reposition:right": 1,
+      "neg_fist_reposition:stop": 1,
+      "neg_natural:up": 1
+    },
+    "confirm_s": {
+      "median": 0.273,
+      "p95": 0.8
+    },
+    "negative_seconds": 248.2,
+    "failing": [
+      "gestures_20261126_053533#1 pose_open_palm: ",
+      "gestures_20261126_053533#15 sweep_right_x3: left x2",
+      "gestures_20261126_054657#3 point_up_x4: down x1, up x3",
+      "gestures_20261126_054657#5 pose_stop: ",
+      "gestures_20261126_054657#7 pose_stop: ",
+      "gestures_20261126_054657#13 sweep_left_x3: left x4",
+      "gestures_s5_left_20261127_135337#1 eval_down_x5: down x8",
+      "gestures_s5_left_20261127_135337#3 eval_up_then_down: up x3, down x1",
+      "gestures_s5_left_20261127_135337#8 eval_fist_up_x4: up x1",
+      "gestures_s5_left_20261127_135337#9 eval_fist_down_x4: up x1",
+      "gestures_s5_left_20261127_135337#10 eval_fist_right_x4: right x3",
+      "gestures_s5_left_20261127_135337#11 eval_fist_left_x4: left x3",
+      "gestures_s5_right_20261127_135040#3 eval_up_then_down: up x2, down x3",
+      "gestures_s5_right_20261127_135040#8 eval_fist_up_x4: up x3",
+      "gestures_s5_right_20261127_135040#9 eval_fist_down_x4: "
+    ]
+  }
+}

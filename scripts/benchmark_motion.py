@@ -74,6 +74,8 @@ class Table:
     negative_seconds: float = 0.0
     failing: list[str] = field(default_factory=list)
     ghost_frames: int = 0
+    confirm_s: list[float] = field(default_factory=list)
+    """Stroke start to confirmation of every swipe in a positive segment (seconds)."""
 
 
 def kind_of(label: str) -> str:
@@ -129,6 +131,9 @@ def score(
                     table.negative_events[f"{label}:{SHORT.get(g, g.value)}"] += n
             continue
         wanted = {e.gesture: e.count, **dict(e.also)}
+        table.confirm_s.extend(
+            ev.duration_s + ev.decision_delay_s for ev in evs if ev.gesture in wanted
+        )
         for g, n in wanted.items():
             cell = Cell(expected=n, segments=1)
             cell.correct = min(got[g], n)
@@ -226,6 +231,12 @@ def show(title: str, table: Table) -> dict:
     if table.negative_events:
         print("     " + ", ".join(f"{k} x{v}" for k, v in sorted(table.negative_events.items())))
     print(f"   duplicate hand detections ignored: {table.ghost_frames} frames")
+    if table.confirm_s:
+        values = sorted(table.confirm_s)
+        median = values[len(values) // 2]
+        p95 = values[min(len(values) - 1, int(0.95 * len(values)))]
+        print(f"   stroke start to confirmation: median {median:.3f} s, p95 {p95:.3f} s")
+        out["confirm_s"] = {"median": round(median, 3), "p95": round(p95, 3)}
     out["negatives"] = dict(table.negative_events)
     out["negative_seconds"] = round(table.negative_seconds, 1)
     out["failing"] = table.failing
@@ -259,6 +270,13 @@ def main() -> int:
         help="score SYNTHETIC degradations of the development recordings",
     )
     parser.add_argument("--json", type=Path)
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        help="regression gate: compare the development rows with a saved --json result and "
+        "exit 1 if a direction loses correct swipes or gains wrong-direction, extra or "
+        "ordinary-activity events",
+    )
     args = parser.parse_args()
 
     settings = GestureSettings()
@@ -315,7 +333,36 @@ def main() -> int:
         result["held-out (real)"] = show("HELD-OUT (real recordings, not used for tuning)", holdout)
     if args.json:
         args.json.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    if args.baseline:
+        return gate(json.loads(args.baseline.read_text(encoding="utf-8")), result)
     return 0
+
+
+def gate(baseline: dict, result: dict) -> int:
+    """Per-row comparison with a saved result; 1 = regression."""
+    key = "development (real)"
+    old, new = baseline[key], result[key]
+    worse = []
+    print(f"== regression gate against the baseline ({key})")
+    for row in sorted(set(old["rows"]) | set(new["rows"])):
+        a = old["rows"].get(row, {})
+        b = new["rows"].get(row, {})
+        deltas = {k: b.get(k, 0) - a.get(k, 0) for k in ("correct", "wrong", "extra", "other")}
+        if any(deltas.values()):
+            print(f"   {row:22} " + "  ".join(f"{k} {v:+d}" for k, v in deltas.items() if v))
+        if deltas["correct"] < 0 or deltas["wrong"] > 0 or deltas["extra"] > 0:
+            worse.append(row)
+    neg_old = sum(old["negatives"].values())
+    neg_new = sum(new["negatives"].values())
+    print(f"   ordinary-activity events {neg_old} -> {neg_new}")
+    if neg_new > neg_old:
+        worse.append("ordinary activity")
+    if "confirm_s" in old and "confirm_s" in new:
+        print(
+            f"   confirmation median {old['confirm_s']['median']} -> {new['confirm_s']['median']} s"
+        )
+    print("   RESULT:", "REGRESSION in " + ", ".join(worse) if worse else "no regression")
+    return 1 if worse else 0
 
 
 if __name__ == "__main__":
