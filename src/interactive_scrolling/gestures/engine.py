@@ -58,6 +58,7 @@ from interactive_scrolling.gestures.types import (
     GesturePhase,
     GestureRejection,
     GestureType,
+    MotionTrace,
     RejectCode,
 )
 from interactive_scrolling.motion.analyzer import HandMotion, MotionFrame
@@ -433,7 +434,20 @@ class GestureEngine:
             blocked_until_ns=self._blocked_until_ns if self._blocked_until_ns > ts else None,
             hint=hint,
             hand_scale_px=pose.scale_px,
+            motion=self._trace(sample, enabled),
         )
+
+    def _trace(self, sample: HandSample, enabled) -> MotionTrace | None:  # type: ignore[no-untyped-def]
+        traces = [
+            d.trace(sample)
+            for d in self._swipe_detectors()
+            if d in enabled and d.phase is not GesturePhase.REARMING
+        ]
+        traces = [t for t in traces if t is not None]
+        if not traces:
+            return None
+        # An unblocked stroke first, then the one that travelled furthest.
+        return max(traces, key=lambda t: (t.phase != "blocked", t.travel_palms))
 
     def _cancel_all(self, ts: int, reason: str, code: str) -> GestureRejection | None:
         rejection = None

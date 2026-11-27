@@ -88,6 +88,7 @@ from interactive_scrolling.gestures.types import (
     GesturePhase,
     GestureRejection,
     GestureType,
+    MotionTrace,
     RejectCode,
 )
 from interactive_scrolling.vision.landmarks import Handedness
@@ -471,6 +472,35 @@ class DirectionalSwipeRecognizer:
         if self.detector.reference == "palm":
             return sample.palm_velocity_px
         return sample.fingertip_velocity_px
+
+    def trace(self, sample: HandSample) -> MotionTrace | None:
+        """The stroke being followed, for the overlay (``None`` when the hand rests)."""
+        stroke = self._stroke
+        if stroke is None and self._flick is not None:
+            stroke = self._flick.stroke
+        if stroke is None or not stroke.scale_px:
+            return None
+        position = self._pos(sample)
+        travel = _dot(
+            self._displacement(position, stroke.start_pos, stroke.scale_px), stroke.direction
+        )
+        if self._flick is not None or stroke.qualified_ns:
+            phase = "waiting"
+        elif stroke.is_return:
+            phase = "return"
+        elif stroke.blocked:
+            phase = "blocked"
+        else:
+            phase = "moving"
+        return MotionTrace(
+            detector=self.detector.name,
+            gesture=stroke.gesture,
+            reference_px=position,
+            start_px=stroke.start_pos,
+            travel_palms=round(max(travel, 0.0), 3),
+            required_palms=swipe_distance(self.settings, stroke.gesture, self.detector.name),
+            phase=phase,
+        )
 
     def adopt(self, gesture: GestureType, start_ns: int, ts: int) -> None:
         """A swipe confirmed by another detector of the same hand: remember it in this

@@ -186,6 +186,24 @@ class GestureRejection:
 
 
 @dataclass(frozen=True, slots=True)
+class MotionTrace:
+    """The stroke a swipe detector is following right now (measured, for the overlay)."""
+
+    detector: str
+    gesture: GestureType
+    reference_px: tuple[float, float]
+    """Current position of the motion reference (fingertip or palm centre), source pixels."""
+    start_px: tuple[float, float]
+    """Where the stroke started, source pixels."""
+    travel_palms: float
+    """Travel along the committed direction, hand lengths."""
+    required_palms: float
+    phase: str
+    """``moving``, ``return`` (the hand coming back), ``blocked`` (cooldown / not armed /
+    not activated) or ``waiting`` (flick waiting for the finger, hand near the bottom)."""
+
+
+@dataclass(frozen=True, slots=True)
 class GestureFrame:
     """Gesture engine output for one processed frame."""
 
@@ -206,3 +224,4 @@ class GestureFrame:
     """A positioning hint from measured tracking quality (e.g. hand too far away)."""
     hand_scale_px: float | None = None
     """Hand size of the control hand in source pixels (``pose.hand_scale_px``)."""
+    motion: MotionTrace | None = None

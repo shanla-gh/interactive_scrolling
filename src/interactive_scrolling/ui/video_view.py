@@ -178,6 +178,34 @@ class VideoView(QWidget):
             painter.drawLine(QPointF(cx, cy), QPointF(cx + dx * length, cy))
             painter.drawLine(QPointF(cx, cy), QPointF(cx, cy + dy * length))
 
+    def _paint_motion(self, painter: QPainter, t: ViewTransform, motion) -> None:  # type: ignore[no-untyped-def]
+        """The measured stroke: start point, arrow to the current reference position, the
+        travel against the required distance and the detector (no invented values)."""
+        colors = {
+            "moving": palette.ACCENT_AMBER,
+            "waiting": palette.ACCENT_CYAN,
+            "return": palette.TEXT_MUTED,
+            "blocked": palette.TEXT_MUTED,
+        }
+        color = QColor(colors.get(motion.phase, palette.TEXT_MUTED))
+        sx, sy = t.map_source_px(*motion.start_px)
+        cx, cy = t.map_source_px(*motion.reference_px)
+        painter.setPen(QPen(color, 3))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(sx, sy), 6, 6)
+        painter.drawLine(QPointF(sx, sy), QPointF(cx, cy))
+        painter.setBrush(color)
+        painter.drawEllipse(QPointF(cx, cy), 5, 5)
+        painter.setFont(self._hud_font)
+        name = motion.gesture.label.replace("SWIPE ", "")
+        text = (
+            f"{motion.detector.upper()} {name}  {motion.travel_palms:.2f}/"
+            f"{motion.required_palms:.2f}"
+        )
+        if motion.phase != "moving":
+            text += f"  ({motion.phase})"
+        painter.drawText(QPointF(cx + 10, cy - 10), text)
+
     def _paint_gesture_feedback(
         self, painter: QPainter, t: ViewTransform, frame: ProcessedFrame
     ) -> None:
@@ -190,7 +218,7 @@ class VideoView(QWidget):
             if state:
                 painter.setPen(QColor(palette.ACCENT_CYAN))
                 painter.drawText(
-                    QRectF(rect.left() + 16, rect.bottom() - 54, rect.width() / 2, 18),
+                    QRectF(rect.left() + 16, rect.bottom() - 78, rect.width() / 2, 18),
                     Qt.AlignmentFlag.AlignLeft,
                     state,
                 )
@@ -201,6 +229,8 @@ class VideoView(QWidget):
                     Qt.AlignmentFlag.AlignCenter,
                     gestures.hint,
                 )
+        if self.show_state and gestures is not None and gestures.motion is not None:
+            self._paint_motion(painter, t, gestures.motion)
         if gestures is not None and gestures.candidates:
             best = max(gestures.candidates, key=lambda c: c.progress)
             width = min(260.0, rect.width() * 0.4)

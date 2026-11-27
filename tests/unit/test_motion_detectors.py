@@ -84,3 +84,14 @@ def test_one_physical_swipe_gives_one_event_and_its_return_is_suppressed_everywh
     events, _ = run([Hand(path, pose=pose)], 3.0, engine=engine())
     assert kinds(events) == ["INDEX_SWIPE_DOWN"]
     assert events[0].detector == "finger"
+
+
+def test_frames_carry_the_measured_stroke_for_the_overlay() -> None:
+    _, frames = run([Hand(stroke((640, 300), (640, 450), 0.8, 0.3))], 2.0)
+    traces = [f.motion for f in frames if f.motion is not None]
+    assert traces and traces[0].detector == "finger"
+    assert traces[0].gesture is G.INDEX_SWIPE_DOWN
+    assert 0.5 <= max(t.travel_palms for t in traces) < 0.8  # shown until it confirms
+    assert all(t.required_palms == 0.8 for t in traces)
+    _, still_frames = run([Hand(still(640, 400))], 1.5)
+    assert all(f.motion is None for f in still_frames)
