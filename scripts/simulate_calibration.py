@@ -43,28 +43,41 @@ PROMPTS = {
     "calib_half_heart": G.HALF_HEART,
     "calib_stop": G.STOP_GESTURE,
 }
+FIST_PROMPTS = {
+    "calib_fist_up": G.INDEX_SWIPE_UP,
+    "calib_fist_down": G.INDEX_SWIPE_DOWN,
+    "calib_fist_left": G.INDEX_SWIPE_LEFT,
+    "calib_fist_right": G.INDEX_SWIPE_RIGHT,
+}
 
 
 def calibrate(frames: list[dict]):  # type: ignore[no-untyped-def]
+    """(finger and pose results, fist results) per gesture, the best attempt of each."""
     collector = CalibrationCollector()
-    results = {}
+    results: dict = {}
+    fist_results: dict = {}
     current = None
+
+    def store(label: str, result) -> None:  # type: ignore[no-untyped-def]
+        target = fist_results if label in FIST_PROMPTS else results
+        gesture = FIST_PROMPTS.get(label) or PROMPTS[label]
+        if gesture not in target or result.valid_demos > target[gesture].valid_demos:
+            target[gesture] = result
+
     for frame in frames:
         key = (frame["segment"], frame["label"])
         if key != current:
             if current is not None and collector.active:
-                result = collector.end()
-                gesture = PROMPTS[current[1]]
-                if gesture not in results or result.valid_demos > results[gesture].valid_demos:
-                    results[gesture] = result
+                store(current[1], collector.end())
             current = key
-            if frame["label"] in PROMPTS:
+            if frame["label"] in FIST_PROMPTS:
+                collector.begin(FIST_PROMPTS[frame["label"]], detector="fist")
+            elif frame["label"] in PROMPTS:
                 collector.begin(PROMPTS[frame["label"]])
         collector.observe(tracking_of(frame, mirror=False))
     if collector.active and current is not None:
-        result = collector.end()
-        results.setdefault(PROMPTS[current[1]], result)
-    return results
+        store(current[1], collector.end())
+    return results, fist_results
 
 
 def main() -> int:
@@ -72,7 +85,7 @@ def main() -> int:
     parser.add_argument("calibration", type=Path)
     parser.add_argument("--test", type=Path, nargs="+", required=True)
     args = parser.parse_args()
-    results = calibrate(load(args.calibration))
+    results, fist_results = calibrate(load(args.calibration))
     for gesture, result in results.items():
         demos = ", ".join(f"{s.length_palms:.2f}" for s in result.demos)
         windups = ", ".join(f"{s.length_palms:.2f}" for s in result.windups)
@@ -81,7 +94,7 @@ def main() -> int:
             + (f" lengths [{demos}] wind-ups [{windups}]" if gesture.is_dynamic else "")
             + (f" | feedback: {'; '.join(result.feedback())}" if result.feedback() else "")
         )
-    derived = derive(results, GestureSettings())
+    derived = derive(results, GestureSettings(), fist_results=fist_results)
     for note in derived.notes:
         print("  -", note)
     changed = {

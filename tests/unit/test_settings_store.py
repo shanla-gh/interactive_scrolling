@@ -312,3 +312,23 @@ def test_new_calibration_is_not_touched(tmp_path: Path) -> None:
     store = SettingsStore(path)
     assert store.load().gestures.swipe_min_distance_palms == 0.9
     assert store.migrations == []
+
+
+def test_control_style_survives_a_named_preset(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "gestures": {
+                    "preset": "balanced",
+                    "control_style": "hybrid",
+                    "enable_palm_swipes": True,
+                },
+                "pairing_token": "an-existing-pairing-token",
+            }
+        ),
+        encoding="utf-8",
+    )
+    g = SettingsStore(path).load().gestures
+    assert g.control_style == "hybrid" and g.enable_palm_swipes is True

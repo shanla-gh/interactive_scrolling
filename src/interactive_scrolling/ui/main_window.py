@@ -42,6 +42,7 @@ from interactive_scrolling.core.pipeline import (
     VisionPipeline,
 )
 from interactive_scrolling.core.stall_monitor import Stall, StallMonitor
+from interactive_scrolling.gestures.explain import event_label
 from interactive_scrolling.gestures.types import GestureEvent
 from interactive_scrolling.services import ControlServices, offline_services
 from interactive_scrolling.storage.settings_store import (
@@ -639,19 +640,20 @@ class MainWindow(QMainWindow):
         self.gesture_panel.show_record(record)
         self.creator.show_record(record)
         if first:
-            self.video.show_gesture(record.event.gesture.label)
+            self.video.show_gesture(event_label(record.event.gesture, record.event.detector))
         if record.status.final and record.status is not ActionStatus.NOT_EXECUTED:
             # The final outcome replaces the gesture banner: immediate feedback first, then
             # the verified result (YouTube can take a second to load the next Short).
             self.video.show_gesture(*outcome_banner(record))
         if record.status.final or record.status is ActionStatus.DISPATCHED:
+            gesture = event_label(record.event.gesture, record.event.detector)
             self.control_bar.set_last(
-                f"{record.event.gesture.label} \u2192 {record.action.label}: {record.status.value}"
+                f"{gesture} \u2192 {record.action.label}: {record.status.value}"
             )
             if record.status.final and record.status is not ActionStatus.NOT_EXECUTED:
                 log.info(
                     "%s -> %s: %s%s",
-                    record.event.gesture.label,
+                    event_label(record.event.gesture, record.event.detector),
                     record.action.label,
                     record.status.value,
                     f" ({record.reason})" if record.reason else "",

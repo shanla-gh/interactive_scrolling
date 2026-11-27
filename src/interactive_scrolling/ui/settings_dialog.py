@@ -64,6 +64,33 @@ TUNABLES = (
         "Distance for left/right swipes; 0 means the same as up/down.",
     ),
     (
+        "fist_swipe_distance_palms",
+        "Fist swipe distance",
+        "palm lengths",
+        0.15,
+        3.0,
+        0.05,
+        "How far the centre of a closed hand must move for a fist swipe.",
+    ),
+    (
+        "swipe_up_distance_palms",
+        "Distance finger up",
+        "palm lengths",
+        0.0,
+        3.0,
+        0.05,
+        "Set by Quick Calibration; 0 means the shared distance.",
+    ),
+    (
+        "swipe_down_distance_palms",
+        "Distance finger down",
+        "palm lengths",
+        0.0,
+        3.0,
+        0.05,
+        "Set by Quick Calibration; 0 means the shared distance.",
+    ),
+    (
         "half_heart_hold_s",
         "Half-heart hold",
         "s",
@@ -103,6 +130,11 @@ TUNABLES = (
 )
 # Physical movement first, content second ("Move finger up -> Next Short"), so a finger
 # movement and the direction the feed moves can never be confused.
+CONTROL_STYLE_LABELS = (
+    ("finger", "Index finger (recommended)"),
+    ("hybrid", "Finger or fist (experimental)"),
+    ("fist", "Fist only (experimental)"),
+)
 ENABLES = (
     ("enable_swipe_up", "Move finger up"),
     ("enable_swipe_down", "Move finger down"),
@@ -168,6 +200,16 @@ class GestureSettingsDialog(QDialog):
                 preference,
             )
         top.addRow("Control hand", self.hand)
+        self.style = QComboBox()
+        for key, text in CONTROL_STYLE_LABELS:
+            self.style.addItem(text, key)
+        self.style.setToolTip(
+            "Fist swipes: close the hand, hold it still briefly, then move it. Experimental: not "
+            "yet verified on real recordings (see the gesture guide)."
+        )
+        top.addRow("Swipe with", self.style)
+        self.palm_box = QCheckBox("Open-hand swipes (experimental, conflicts with the stop pose)")
+        top.addRow("", self.palm_box)
         root.addLayout(top)
 
         tune_box = QGroupBox("Thresholds")
@@ -234,6 +276,8 @@ class GestureSettingsDialog(QDialog):
         self._loading = True
         self.preset.setCurrentIndex(PRESETS.index(settings.preset))
         self.hand.setCurrentIndex(list(ControlHandPreference).index(settings.control_hand))
+        self.style.setCurrentIndex(self.style.findData(settings.control_style))
+        self.palm_box.setChecked(settings.enable_palm_swipes)
         for name, spin in self.spins.items():
             spin.setValue(getattr(settings, name))
         for name, box in self.enables.items():
@@ -255,6 +299,8 @@ class GestureSettingsDialog(QDialog):
         base = GestureSettings.from_preset(
             preset,
             control_hand=current.control_hand,
+            control_style=current.control_style,
+            enable_palm_swipes=current.enable_palm_swipes,
             **{name: getattr(current, name) for name, _ in ENABLES},
         )
         self.load(base, self.result_mapping())
@@ -269,6 +315,8 @@ class GestureSettingsDialog(QDialog):
         values: dict[str, object] = {name: spin.value() for name, spin in self.spins.items()}
         values.update({name: box.isChecked() for name, box in self.enables.items()})
         values["control_hand"] = self.hand.currentData()
+        values["control_style"] = self.style.currentData()
+        values["enable_palm_swipes"] = self.palm_box.isChecked()
         values["preset"] = self.preset.currentData()
         try:
             return replace(GestureSettings(), **values)  # type: ignore[arg-type]

@@ -46,6 +46,7 @@ from interactive_scrolling.config.settings import (
 from interactive_scrolling.core.auxiliary import AuxiliaryWorker
 from interactive_scrolling.core.pipeline import ProcessedFrame
 from interactive_scrolling.core.timing import now_ns
+from interactive_scrolling.gestures.explain import event_label
 from interactive_scrolling.ui.theme import mono_font
 from interactive_scrolling.vision.compositing import MaskCompositor
 from interactive_scrolling.visualization import palette
@@ -193,7 +194,7 @@ class CreatorOverlay(QWidget):
         self.update()
 
     def show_record(self, record: ActionRecord) -> None:
-        label = record.event.gesture.label
+        label = event_label(record.event.gesture, record.event.detector)
         if record.action is not ActionType.NONE:
             label += f" → {record.action.label}"
         status = record.status if record.status.final else None

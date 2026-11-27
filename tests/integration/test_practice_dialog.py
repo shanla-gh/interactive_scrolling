@@ -135,3 +135,34 @@ def test_main_window_opens_one_practice_dialog_and_feeds_it_frames(qtbot, tmp_pa
     qtbot.waitUntil(lambda: first.successes >= 1 or first.index > 0, timeout=8000)
     first.close()
     assert services.dispatcher.mode is ControlMode.TRACKING_ONLY
+
+
+def test_fist_practice_enables_fist_swipes_only_for_the_window(qtbot, tmp_path) -> None:
+    dialog, services = make(qtbot, tmp_path)
+    assert services.engine.settings.control_style == "finger"
+    dialog.method_box.setCurrentIndex(dialog.method_box.findData("fist"))
+    dialog.start("practice")
+    services.engine.update(
+        TrackingResult(0, 1, 1280, 720, ()),
+        MotionAnalyzer().update(TrackingResult(0, 1, 1280, 720, ())),
+    )
+    assert services.engine.settings.control_style == "hybrid"
+    assert dialog.current == (G.INDEX_SWIPE_UP, "fist")
+    finger = GestureEvent(
+        G.INDEX_SWIPE_UP, time.perf_counter_ns(), 1, Handedness.RIGHT, detector="finger"
+    )
+    services.dispatcher.submit(finger)
+    qtbot.waitUntil(lambda: "That was SWIPE UP" in dialog.result.text(), timeout=2000)
+    assert dialog.successes == 0
+    fist = GestureEvent(
+        G.INDEX_SWIPE_UP, time.perf_counter_ns(), 1, Handedness.RIGHT, detector="fist"
+    )
+    services.dispatcher.submit(fist)
+    qtbot.waitUntil(lambda: dialog.successes == 1, timeout=2000)
+    assert "SWIPE UP (fist)" in dialog.result.text()
+    dialog.close()
+    services.engine.update(
+        TrackingResult(0, 2, 1280, 720, ()),
+        MotionAnalyzer().update(TrackingResult(0, 2, 1280, 720, ())),
+    )
+    assert services.engine.settings.control_style == "finger"

@@ -31,6 +31,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -44,12 +45,23 @@ from PySide6.QtWidgets import (
 from interactive_scrolling.actions.types import ActionRecord, ControlMode
 from interactive_scrolling.core.pipeline import ProcessedFrame
 from interactive_scrolling.gestures.calibration import DEMOS_PER_GESTURE, PromptResult, derive
-from interactive_scrolling.gestures.explain import explain_rejection, instruction, state_label
+from interactive_scrolling.gestures.explain import (
+    event_label,
+    explain_rejection,
+    instruction,
+    state_label,
+)
 from interactive_scrolling.gestures.types import GestureType
 from interactive_scrolling.visualization import palette
 
 log = logging.getLogger(__name__)
 G = GestureType
+FINGER_SWIPES = (
+    G.INDEX_SWIPE_UP,
+    G.INDEX_SWIPE_DOWN,
+    G.INDEX_SWIPE_RIGHT,
+    G.INDEX_SWIPE_LEFT,
+)
 SEQUENCE = (
     G.INDEX_SWIPE_UP,
     G.INDEX_SWIPE_DOWN,
@@ -58,6 +70,16 @@ SEQUENCE = (
     G.HALF_HEART,
     G.STOP_GESTURE,
 )
+METHODS = (("finger", "Finger swipes"), ("fist", "Fist swipes (experimental)"))
+
+
+def steps_for(method: str) -> list[tuple[GestureType, str]]:
+    """The practice/calibration steps: the four swipes with the chosen method, then the
+    half-heart and the stop pose."""
+    swipes = [(g, method) for g in FINGER_SWIPES]
+    return [*swipes, (G.HALF_HEART, ""), (G.STOP_GESTURE, "")]
+
+
 PRACTICE_SUCCESSES = 3
 CALIBRATION_TIMEOUT_S = 12.0
 LABELS = {
@@ -165,6 +187,10 @@ class PracticeDialog(QDialog):
         self._seen_entries = 0
         self.derived = None
         self.saved_recording: Path | None = None
+        self.method = "finger"
+        self.steps = steps_for("finger")
+        self.fist_results: dict[GestureType, PromptResult] = {}
+        self._restore_settings = None
 
         root = QHBoxLayout(self)
         left = QVBoxLayout()
@@ -193,6 +219,13 @@ class PracticeDialog(QDialog):
         )
         intro.setWordWrap(True)
         s.addWidget(intro)
+        method_row = QHBoxLayout()
+        method_row.addWidget(QLabel("Swipe method:"))
+        self.method_box = QComboBox()
+        for key, text in METHODS:
+            self.method_box.addItem(text, key)
+        method_row.addWidget(self.method_box, 1)
+        s.addLayout(method_row)
         self.record_box = QCheckBox(
             "Save the hand-landmark numbers of this session for analysis (no video, no images)"
         )
@@ -275,20 +308,35 @@ class PracticeDialog(QDialog):
 
     def start(self, mode: str) -> None:
         self.mode = mode
+        self.method = self.method_box.currentData() if hasattr(self, "method_box") else "finger"
+        self.steps = steps_for(self.method)
         self.index = 0
         self.results = {}
+        self.fist_results = {}
+        if self.method == "fist" and self.services.engine.settings.control_style == "finger":
+            # Fist swipes are experimental: switched on for this window only.
+            from dataclasses import replace
+
+            self._restore_settings = self.services.engine.settings
+            self.services.engine.request_settings(
+                replace(self._restore_settings, control_style="hybrid")
+            )
         if self.record_box.isChecked():
             self.services.recorder.start()
         self.stack.setCurrentIndex(1)
         self._show_prompt()
 
+    @property
+    def current(self) -> tuple[GestureType, str]:
+        return self.steps[self.index]
+
     def _show_prompt(self) -> None:
-        gesture = SEQUENCE[self.index]
-        title, text = instruction(gesture)
+        gesture, detector = self.current
+        title, text = instruction(gesture, detector)
         self.successes = 0
         self.guide.set_gesture(gesture)
         what = "Practice" if self.mode == "practice" else "Quick Calibration"
-        self.step.setText(f"{what} - gesture {self.index + 1} of {len(SEQUENCE)}")
+        self.step.setText(f"{what} - gesture {self.index + 1} of {len(self.steps)}")
         count = PRACTICE_SUCCESSES if self.mode == "practice" else DEMOS_PER_GESTURE
         self.title.setText(f"{title}  ({count} times)" if gesture.is_dynamic else title)
         self.explanation.setText(text)
@@ -297,10 +345,13 @@ class PracticeDialog(QDialog):
         self._update_counter()
         self._prompt_started = time.monotonic()
         self._seen_entries = len(self.services.diagnostics.recent(1000))
-        label = f"{'practice' if self.mode == 'practice' else 'calib'}_{LABELS[gesture]}"
-        self.services.recorder.label(label, CALIBRATION_TIMEOUT_S, title)
+        prefix = "practice" if self.mode == "practice" else "calib"
+        middle = "fist_" if detector == "fist" else ""
+        self.services.recorder.label(
+            f"{prefix}_{middle}{LABELS[gesture]}", CALIBRATION_TIMEOUT_S, title
+        )
         if self.mode == "calibration":
-            self.services.calibration.begin(gesture)
+            self.services.calibration.begin(gesture, detector or "finger")
 
     def _update_counter(self) -> None:
         if self.mode == "practice":
@@ -309,13 +360,17 @@ class PracticeDialog(QDialog):
     def repeat(self) -> None:
         self._show_prompt()
 
+    def _store(self, result: PromptResult) -> None:
+        gesture, detector = self.current
+        (self.fist_results if detector == "fist" else self.results)[gesture] = result
+
     def advance(self) -> None:
         if self.mode == "calibration" and self.services.calibration.active:
             result = self.services.calibration.end()
             if result is not None:
-                self.results[SEQUENCE[self.index]] = result
+                self._store(result)
         self.index += 1
-        if self.index >= len(SEQUENCE):
+        if self.index >= len(self.steps):
             self._finish()
         else:
             self._show_prompt()
@@ -328,14 +383,19 @@ class PracticeDialog(QDialog):
                 log.warning("Recording could not be saved: %s", exc)
         lines = []
         if self.mode == "calibration":
-            hand = ""
-            self.derived = derive(self.results, self.services.user_settings.gestures, hand)
+            self.derived = derive(
+                self.results,
+                self.services.user_settings.gestures,
+                "",
+                fist_results=self.fist_results,
+            )
             lines.append("<b>Quick Calibration results</b>")
-            for gesture in SEQUENCE:
-                result = self.results.get(gesture)
+            for gesture, detector in self.steps:
+                store = self.fist_results if detector == "fist" else self.results
+                result = store.get(gesture)
                 n = result.valid_demos if result else 0
                 status = "&#10003;" if n >= 2 or (n >= 1 and not gesture.is_dynamic) else "&#10007;"
-                lines.append(f"{status} {instruction(gesture)[0]}: {n} usable")
+                lines.append(f"{status} {instruction(gesture, detector)[0]}: {n} usable")
             lines.append("<br><b>What would change</b>")
             lines += [f"- {note}" for note in self.derived.notes]
             self.apply_button.setEnabled(True)
@@ -353,15 +413,18 @@ class PracticeDialog(QDialog):
             item = self.redo_row.takeAt(0)
             if item.widget() is not None:
                 item.widget().deleteLater()
-        for gesture in SEQUENCE:
-            button = QPushButton(f"Redo {LABELS[gesture].replace('_', '-')}")
-            button.clicked.connect(lambda _=False, g=gesture: self.recalibrate(g))
+        for index, (gesture, detector) in enumerate(self.steps):
+            name = LABELS[gesture].replace("_", "-")
+            button = QPushButton(f"Redo {'fist ' if detector == 'fist' else ''}{name}")
+            button.clicked.connect(lambda _=False, i=index: self.recalibrate(i))
             self.redo_row.addWidget(button)
 
-    def recalibrate(self, gesture: GestureType) -> None:
+    def recalibrate(self, step: int | GestureType) -> None:
         """Repeat one gesture's demonstrations only, then return to the summary."""
         self.mode = "calibration"
-        self.index = SEQUENCE.index(gesture)
+        if isinstance(step, GestureType):
+            step = next(i for i, (g, _) in enumerate(self.steps) if g is step)
+        self.index = step
         self._single = True
         self.stack.setCurrentIndex(1)
         self._show_prompt()
@@ -370,11 +433,13 @@ class PracticeDialog(QDialog):
         if self.derived is None:
             return
         self.services.apply_calibration(self.derived.settings, self.derived.profile)
+        self._restore_settings = None  # the applied profile is now the user's setting
         self.summary.setText(self.summary.text() + "<br><br><b>Your profile is in use.</b>")
         self.apply_button.setEnabled(False)
 
     def restore_defaults(self) -> None:
         self.services.reset_calibration()
+        self._restore_settings = None
         self.summary.setText(self.summary.text() + "<br><br><b>Standard recognition restored.</b>")
 
     # ------------------------------------------------------------------ live input
@@ -388,9 +453,15 @@ class PracticeDialog(QDialog):
         if gestures is None or self.stack.currentIndex() != 1:
             return
         self.state.setText(state_label(gestures) + (f"   {gestures.hint}" if gestures.hint else ""))
-        target = SEQUENCE[self.index]
+        target = self.current[0]
         progress = [c.progress for c in gestures.candidates if c.gesture is target]
         self.progress.setValue(int(100 * (progress[0] if progress else 0)))
+
+    def _matches(self, record: ActionRecord) -> bool:
+        gesture, detector = self.current
+        if record.event.gesture is not gesture:
+            return False
+        return not gesture.is_dynamic or (record.event.detector or "finger") == detector
 
     def _tick(self) -> None:
         records = []
@@ -401,17 +472,16 @@ class PracticeDialog(QDialog):
                 break
         if self.stack.currentIndex() != 1:
             return
-        target = SEQUENCE[self.index]
+        target, detector = self.current
         if self.mode == "practice":
             for record in records:
-                if record.status.final and record.event.gesture is target:
+                label = event_label(record.event.gesture, record.event.detector)
+                if record.status.final and self._matches(record):
                     self.successes += 1
-                    self.result.setText(f"✓ Recognized: {target.label}")
+                    self.result.setText(f"\u2713 Recognized: {label}")
                     self.result.setStyleSheet(f"color: {palette.ACCENT_GREEN};")
                 elif record.status.final:
-                    self.result.setText(
-                        f"That was {record.event.gesture.label}. {instruction(target)[0]}."
-                    )
+                    self.result.setText(f"That was {label}. {instruction(target, detector)[0]}.")
                     self.result.setStyleSheet(f"color: {palette.ACCENT_AMBER};")
             self._show_latest_rejection(target)
             self._update_counter()
@@ -428,7 +498,7 @@ class PracticeDialog(QDialog):
         feedback = progress.feedback()
         elapsed = time.monotonic() - self._prompt_started
         if n >= DEMOS_PER_GESTURE or (not target.is_dynamic and n >= 1 and elapsed > 2.0):
-            self.result.setText("✓ Captured.")
+            self.result.setText("\u2713 Captured.")
             self.result.setStyleSheet(f"color: {palette.ACCENT_GREEN};")
             self.advance_after_capture()
         elif feedback and elapsed > 3.0:
@@ -441,15 +511,15 @@ class PracticeDialog(QDialog):
             self.result.setStyleSheet(f"color: {palette.ACCENT_AMBER};")
             result = self.services.calibration.end()
             if result is not None:
-                self.results[target] = result
+                self._store(result)
 
     def advance_after_capture(self) -> None:
         if getattr(self, "_single", False):
             result = self.services.calibration.end()
             if result is not None:
-                self.results[SEQUENCE[self.index]] = result
+                self._store(result)
             self._single = False
-            self.index = len(SEQUENCE) - 1
+            self.index = len(self.steps) - 1
             self._finish()
             return
         self.advance()
@@ -486,6 +556,10 @@ class PracticeDialog(QDialog):
             self.services.calibration.end()
         if self.services.recorder.recording:
             self.services.save_recording(self.data_folder / "recordings")
+        if self._restore_settings is not None:
+            # Fist swipes were only switched on for this window.
+            self.services.engine.request_settings(self._restore_settings)
+            self._restore_settings = None
         self.services.dispatcher.remove_record_listener(self._record_from_any_thread)
         # Live control is never switched back on silently after practice: the user does
         # that deliberately (an emergency disable meanwhile is kept as well).

@@ -222,7 +222,14 @@ def _gesture_settings_from_json(data: Any, warnings: list[str]) -> GestureSettin
         if any(
             getattr(settings, f.name) != getattr(defaults, f.name)
             for f in fields(GestureSettings)
-            if f.name not in ("preset", "control_hand", *GESTURE_ENABLE_FIELDS)
+            if f.name
+            not in (
+                "preset",
+                "control_hand",
+                "control_style",
+                "enable_palm_swipes",
+                *GESTURE_ENABLE_FIELDS,
+            )
         ):
             settings = replace(settings, preset=SensitivityPreset.CUSTOM)
     if not settings.preset.keeps_values:
@@ -232,6 +239,8 @@ def _gesture_settings_from_json(data: Any, warnings: list[str]) -> GestureSettin
         settings = GestureSettings.from_preset(
             settings.preset,
             control_hand=settings.control_hand,
+            control_style=settings.control_style,
+            enable_palm_swipes=settings.enable_palm_swipes,
             **{name: getattr(settings, name) for name in GESTURE_ENABLE_FIELDS},
         )
     return settings

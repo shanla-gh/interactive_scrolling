@@ -58,9 +58,31 @@ _DIRECTION_WORD = {
 }
 
 
-def instruction(gesture: GestureType) -> tuple[str, str]:
-    """(short title, one-paragraph explanation) for ``gesture``."""
+_FIST_WORD = {
+    G.INDEX_SWIPE_UP: "UP",
+    G.INDEX_SWIPE_DOWN: "DOWN",
+    G.INDEX_SWIPE_RIGHT: "to YOUR RIGHT",
+    G.INDEX_SWIPE_LEFT: "to YOUR LEFT",
+}
+
+
+def instruction(gesture: GestureType, detector: str = "finger") -> tuple[str, str]:
+    """(short title, one-paragraph explanation) for ``gesture`` made with ``detector``."""
+    if detector == "fist" and gesture in _FIST_WORD:
+        word = _FIST_WORD[gesture]
+        return (
+            f"Move your FIST {word}",
+            f"Close your hand into a fist, hold it still for a moment, then move it {word.lower()}"
+            " with a small, quick movement of the wrist or hand. Then let it come back.",
+        )
     return INSTRUCTIONS[gesture]
+
+
+def event_label(gesture: GestureType, detector: str = "") -> str:
+    """Display name of a recognized gesture, naming the detector for fist and palm swipes."""
+    if detector in ("fist", "palm"):
+        return f"{gesture.label} ({detector})"
+    return gesture.label
 
 
 def _short(gesture: GestureType) -> str:
@@ -99,6 +121,8 @@ def explain_rejection(rejection: GestureRejection) -> str:
         return "Ignored: this looked like your hand moving back after the previous swipe."
     if code == RejectCode.COOLDOWN:
         return "Ignored: too soon after the previous gesture."
+    if code == RejectCode.NOT_ACTIVATED:
+        return f"{name}: close the hand into a fist and hold it still briefly before moving."
     if code == RejectCode.NOT_ARMED:
         return "Ignored: the hand was already moving when it appeared. Hold it still briefly."
     if code == RejectCode.DISABLED:

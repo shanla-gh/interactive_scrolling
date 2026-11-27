@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from interactive_scrolling.actions.types import ActionRecord, ActionStatus, ActionType
-from interactive_scrolling.gestures.explain import explain_rejection
+from interactive_scrolling.gestures.explain import event_label, explain_rejection
 from interactive_scrolling.gestures.types import ControlStatus, GestureFrame
 from interactive_scrolling.ui.panels import NO_DATA, Card
 from interactive_scrolling.visualization import palette
@@ -132,7 +132,7 @@ class GesturePanel(Card):
         self.hint.setText(frame.hint or NO_DATA)
 
     def show_record(self, record: ActionRecord) -> None:
-        self.last.setText(record.event.gesture.label)
+        self.last.setText(event_label(record.event.gesture, record.event.detector))
         action = record.action.label if record.action is not ActionType.NONE else "none"
         self.action.setText(f"{action} — {describe(record)}")
 
@@ -163,7 +163,12 @@ class GestureHistory(QTableWidget):
         if item is None:
             self.insertRow(0)
             stamp = datetime.fromtimestamp(record.wall_time).strftime("%H:%M:%S")
-            values = (stamp, record.event.gesture.label, record.action.label, "")
+            values = (
+                stamp,
+                event_label(record.event.gesture, record.event.detector),
+                record.action.label,
+                "",
+            )
             for column, value in enumerate(values):
                 self.setItem(0, column, QTableWidgetItem(value))
             item = self.item(0, 3)
