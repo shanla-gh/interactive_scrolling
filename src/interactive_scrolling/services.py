@@ -36,6 +36,7 @@ from interactive_scrolling.config.settings import (
     GestureSettings,
     SensitivityPreset,
 )
+from interactive_scrolling.gestures.calibration import CalibrationCollector
 from interactive_scrolling.gestures.diagnostics import GestureDiagnostics, LandmarkRecorder
 from interactive_scrolling.gestures.engine import GestureEngine
 from interactive_scrolling.gestures.types import GestureFrame
@@ -100,6 +101,7 @@ class ControlServices:
         self.eye_report = None
         self.diagnostics = GestureDiagnostics()
         self.recorder = LandmarkRecorder()
+        self.calibration = CalibrationCollector()
         self.dispatcher.add_record_listener(self._diagnose_record)
 
     # ------------------------------------------------------------------ diagnostics
@@ -108,6 +110,8 @@ class ControlServices:
         """Every processed frame (processing thread): diagnostics and the opt-in recorder."""
         self.diagnostics.observe(tracking, frame)
         self.recorder.observe(tracking)
+        if self.calibration.active:
+            self.calibration.observe(tracking)
 
     def _diagnose_record(self, record: ActionRecord) -> None:
         if record.status.final:

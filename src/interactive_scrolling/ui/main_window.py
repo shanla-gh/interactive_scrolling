@@ -588,6 +588,9 @@ class MainWindow(QMainWindow):
         self.motion_panel.update_motion(frame, self.video.mirrored)
         enabled = self.services.dispatcher.mode is not ControlMode.TRACKING_ONLY
         self.gesture_panel.show_frame(frame.gestures, enabled)
+        practice = getattr(self, "practice_dialog", None)
+        if practice is not None and practice.isVisible():
+            practice.show_frame(frame)
 
     def _on_mirror_changed(self, mirrored: bool) -> None:
         self.settings.mirror_preview = mirrored

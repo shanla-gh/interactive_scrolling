@@ -89,6 +89,10 @@ class ActionDispatcher:
     def add_record_listener(self, listener: RecordListener) -> None:
         self._record_listeners.append(listener)
 
+    def remove_record_listener(self, listener: RecordListener) -> None:
+        if listener in self._record_listeners:
+            self._record_listeners.remove(listener)
+
     def add_mode_listener(self, listener: ModeListener) -> None:
         self._mode_listeners.append(listener)
 

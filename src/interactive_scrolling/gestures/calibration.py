@@ -289,13 +289,24 @@ class _Holds:
         else:
             self.close()
 
+    def snapshot(self) -> list[HeldPose]:
+        """The finished holds plus the current one if it is already long enough."""
+        current = self._summarize(self._run)
+        return self.holds + ([current] if current is not None else [])
+
     def close(self) -> None:
         run, self._run = self._run, []
+        held = self._summarize(run)
+        if held is not None:
+            self.holds.append(held)
+
+    @staticmethod
+    def _summarize(run: list) -> HeldPose | None:  # type: ignore[type-arg]
         if len(run) < 2:
-            return
+            return None
         duration = (run[-1][0] - run[0][0]) / NS_PER_S
         if duration < MIN_HOLD_S:
-            return
+            return None
         poses = [pose for _, pose in run]
         features = [heart_features(p) for p in poses]
         features = [f for f in features if f is not None]
@@ -312,14 +323,12 @@ class _Holds:
             for p in poses
         )
         labels = [p.label.value for p in poses]
-        self.holds.append(
-            HeldPose(
-                duration_s=round(duration, 2),
-                features=median,
-                upright_deg=round(upright, 1),
-                four_extended=extended >= len(poses) / 2,
-                label=max(set(labels), key=labels.count),
-            )
+        return HeldPose(
+            duration_s=round(duration, 2),
+            features=median,
+            upright_deg=round(upright, 1),
+            four_extended=extended >= len(poses) / 2,
+            label=max(set(labels), key=labels.count),
         )
 
 
@@ -362,7 +371,7 @@ class CalibrationCollector:
             if self._result is None:
                 return None
             copy = replace(self._result, scales=list(self._result.scales))
-            _classify(copy, list(self._segmenter.strokes), list(self._holds.holds))
+            _classify(copy, list(self._segmenter.strokes), self._holds.snapshot())
             return copy
 
     def observe(self, tracking: TrackingResult) -> None:
