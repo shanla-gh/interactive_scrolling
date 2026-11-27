@@ -2,40 +2,82 @@
 
 Each recognizer receives one :class:`HandSample` per frame for the control hand and returns
 at most one confirmed :class:`GestureEvent`. All durations come from frame timestamps, so
-behaviour does not depend on the frame rate. Distances and speeds are in palm lengths.
+behaviour does not depend on the frame rate. Distances and speeds are in hand lengths ("palm
+lengths"), measured with a stable hand scale (see *Scale*).
 
 Index swipes (dynamic, one recognizer for all four directions)
-    The index fingertip of a *pointing* hand is followed in two dimensions. A stroke starts
-    when the fingertip moves faster than ``START_SPEED`` along its dominant axis while the hand
-    points, and is measured from where the fingertip last rested. The direction is committed
-    at the start. The stroke is confirmed as soon as the displacement along that direction
-    reaches the minimum distance, provided the peak speed, the direction ratio (diagonals are
-    rejected, never guessed), the pose fraction and the maximum duration are all satisfied. A
-    reversal starts the opposite stroke from the turning point.
+    The index fingertip is followed in two dimensions. A stroke starts when the fingertip
+    moves faster than ``START_SPEED`` along its dominant axis and is measured from where the
+    fingertip last rested. The direction is committed at the start. The stroke is confirmed as
+    soon as the displacement along that direction reaches the minimum distance (early
+    confirmation: the user does not have to finish an exaggerated movement), provided the
+    peak speed, the direction ratio (diagonals are rejected, never guessed), the hand pose
+    and the maximum duration are satisfied. A reversal starts the opposite stroke from the
+    turning point.
+
+Hand pose (``pose_rule="endpoints"``)
+    A stroke made with a pointing hand (pointing when the distance is reached and during at
+    least half of the stroke, or held pointing just before it started) is confirmed at once.
+    A small downward flick, however, curls the index finger: in the labeled recordings the
+    hand reads as a fist in 10-12 of ~12 frames of every downward flick, so requiring the
+    pointing pose throughout (version 0.3, ``"fraction"``) made downward flicks nearly
+    impossible. Relaxing a pointing finger into a fist moves the fingertip the same way,
+    though. A stroke that started from a held pointing pose but has the finger curled when it
+    reaches the distance is therefore a *pending flick*: it is confirmed only when the finger
+    extends again within ``FLICK_REEXTEND_S`` (the flick's natural recovery) and rejected if
+    the finger stays curled. An open hand or a fist moving is never a swipe.
+
+Arming (``arming="observe"``)
+    A newly acquired hand cannot swipe until the recognizer has seen it at rest once (one
+    frame below ``STALL_SPEED``): a hand raised into view while already pointing cannot
+    register its entry as a swipe. Strokes that happen before that, or during the cooldown
+    after a gesture, are *followed* but not confirmed, and when they meet the motion criteria
+    they are remembered like a confirmed swipe so that their return movement is suppressed
+    too. Version 0.3 (``"still"``) instead required 0.2 s of stillness; during continuous
+    movement that pause never came, the recognizer only armed at the end of a stroke and
+    then confirmed the *return* - the main cause of opposite-direction results on recorded
+    horizontal movements.
 
 Return movements
     After a swipe the hand usually moves back, about as fast and as far as the swipe itself,
-    often in several parts and overshooting the starting point (seen in the recordings). Every
-    opposite-direction stroke is treated as part of that *return* until the return phase ends:
-    either the fingertip is back near the swipe's starting point (within
-    ``RETURN_ZONE_FRACTION`` of the swipe length) and has *paused* there for
-    ``RETURN_SETTLE_S``, or ``return_window_s`` has passed since the swipe's movement ended.
-    So "next, then previous" needs only a brief pause after the hand has come back, not a long
-    fixed delay, while a return that flows on past the start cannot trigger the opposite
-    action.
+    often in several parts and overshooting the starting point. Every opposite-direction
+    stroke is part of that *return* until the return phase ends: either the fingertip is back
+    near the swipe's starting point (within ``RETURN_ZONE_FRACTION`` of the swipe length) and
+    has paused there for ``RETURN_SETTLE_S``, or ``return_window_s`` has passed since the
+    swipe's movement ended. Ending the return phase after a pause anywhere was measured and
+    rejected: between a stroke and the next movement the hand pauses 0.2-0.37 s (median, up
+    to 1.4 s) in the recordings, so about half of all natural returns would have become false
+    reverse gestures.
+
+Scale (``scale="rest"``)
+    The projected palm length changes 3-5 fold while the wrist rotates during horizontal
+    movements (27-184 px in one recorded sweep). The scale is the larger of palm length and
+    palm width (see ``pose.hand_scale_px``), smoothed while the hand is not stroking and
+    frozen for the duration of a stroke.
+
+Tracking dropouts
+    Fast movements blur and MediaPipe loses the hand for a few frames. The engine keeps the
+    current candidate through gaps of up to ``RecognizerOptions.dropout_s``; the stroke
+    continues from where the hand reappears.
 
 Static poses
-    A candidate starts when the pose is shown with the palm nearly still; it is confirmed
-    after the hold time. Short pose dropouts (tracking flicker) are tolerated. After a
-    confirmation the pose must be released for ``RELEASE_S`` before it can trigger again, so
-    holding a pose produces exactly one event.
+    A candidate starts when the pose is shown with the hand still; it is confirmed after the
+    hold time. Stillness (``static_still="window"``) is the net palm drift over
+    ``STATIC_WINDOW_S`` rather than the instantaneous speed: at arm's length a hand is only
+    ~40 px long and one pixel of landmark jitter already reads as ~1 palm length per second.
+    Short pose dropouts are tolerated. After a confirmation the pose must be released for
+    ``RELEASE_S`` before it can trigger again, so holding a pose produces exactly one event.
+
+Every rejection carries a stable ``code`` and, where it applies, the measured and the
+required value, so the user can be told exactly why a gesture was not accepted.
 """
 
 from __future__ import annotations
 
 import math
+from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from interactive_scrolling.config.settings import GestureSettings
 from interactive_scrolling.core.timing import NS_PER_S
@@ -46,32 +88,97 @@ from interactive_scrolling.gestures.types import (
     GesturePhase,
     GestureRejection,
     GestureType,
+    RejectCode,
 )
 from interactive_scrolling.vision.landmarks import Handedness
 
 START_SPEED = 0.8
 """Axis speed (palms/s) that starts a swipe candidate."""
 STALL_SPEED = 0.4
-"""Axis speed (palms/s) below which a started stroke is considered to have stopped."""
+"""Axis speed (palms/s) below which a started stroke is considered to have stopped, and below
+which the hand counts as resting."""
 STALL_TIME_S = 0.12
 POSE_DROPOUT_S = 0.15
-"""Static poses survive pose-classification gaps up to this long."""
+"""Static poses survive pose-classification gaps up to this long (version 0.3 strategy)."""
 RELEASE_S = 0.25
 """A static pose must be absent this long before it can trigger again."""
 INITIAL_REARM_STILL_S = 0.2
-"""A newly acquired control hand must be nearly still this long before its first swipe, so a
-hand raised into view (for example already pointing) cannot register as a swipe."""
+"""``arming="still"`` only (version 0.3): a newly acquired hand had to be nearly still this
+long before its first swipe."""
 RETURN_ZONE_FRACTION = 0.35
-"""An opposite stroke that starts further than this fraction of the previous swipe's length
-from that swipe's starting point is the hand's return movement."""
 RETURN_SETTLE_S = 0.1
 RETURN_SETTLE_SPEED = 0.5
 """The return phase ends after the fingertip has stayed below this speed (palms/s), back near
 the swipe's starting point, for ``RETURN_SETTLE_S``."""
 MAX_REST_AGE_S = 0.25
 """A stroke is measured from the last resting position only if that rest is this recent."""
+POSE_WINDOW_S = 0.25
+"""``pose_rule="endpoints"``: the pose shown this long before a stroke starts counts."""
+ORIGIN_POSE_FRACTION = 0.6
+ORIGIN_POSE_MIN_FRAMES = 3
+"""Pointing before the stroke must be sustained (a single stray "pointing" frame during
+ordinary hand movement is common in the recordings and caused false swipes)."""
+ENDPOINT_POSE_FRACTION = 0.5
+FLICK_REEXTEND_S = 0.8
+"""A curled-finger flick is confirmed only if the finger recovers within this time: it is
+pointing again, or the fingertip has started back by ``FLICK_RECOVERY_PALMS`` (earlier than the
+pose label, which flips only once the finger is almost straight again)."""
+FLICK_RECOVERY_PALMS = 0.25
+SCALE_TIME_CONSTANT_S = 0.25
+END_WAIT_MAX_S = 0.3
+"""``confirm="end"``: a qualified stroke is confirmed when it stops, at the latest this long
+after it met all criteria."""
+MAX_TRAVEL_PALMS = 4.5
+"""``confirm="end"``: a stroke that travels further than this before stopping is a large arm
+movement (for example lowering the hand out of view), not a swipe."""
+STATIC_WINDOW_S = 0.3
+STATIC_MAX_DRIFT_PALMS = 0.25
+"""``static_still="window"``: the palm may drift at most this far within ``STATIC_WINDOW_S``."""
 
 Vector = tuple[float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class RecognizerOptions:
+    """Recognition strategies compared in the Brief 004 benchmark
+    (docs/benchmarks/GESTURE_BENCHMARK_004.md). The defaults are the selected strategies;
+    :data:`V03_OPTIONS` reproduces version 0.3 for comparison."""
+
+    arming: str = "observe"
+    pose_rule: str = "endpoints"
+    scale: str = "rest"
+    dropout_s: float = 0.2
+    static_still: str = "window"
+    static_while_stabilizing: bool = False
+    """Static poses may start their hold while a new hand is still stabilizing (evaluated in
+    Brief 004: no recall gain on the recordings, so not enabled)."""
+    confirm: str = "early"
+    """``"early"``: confirm as soon as all criteria are met; ``"end"``: wait until the stroke
+    stops inside the view (rejects hands leaving the picture, costs latency)."""
+
+    def __post_init__(self) -> None:
+        if self.confirm not in ("early", "end"):
+            raise ValueError(f"unknown confirmation strategy {self.confirm!r}")
+        if self.arming not in ("observe", "still"):
+            raise ValueError(f"unknown arming strategy {self.arming!r}")
+        if self.pose_rule not in ("endpoints", "fraction"):
+            raise ValueError(f"unknown pose rule {self.pose_rule!r}")
+        if self.scale not in ("rest", "stroke_max"):
+            raise ValueError(f"unknown scale strategy {self.scale!r}")
+        if self.static_still not in ("window", "velocity"):
+            raise ValueError(f"unknown stillness strategy {self.static_still!r}")
+        if not 0.0 <= self.dropout_s <= 0.5:
+            raise ValueError("dropout_s must be within [0, 0.5]")
+
+
+V03_OPTIONS = RecognizerOptions(
+    arming="still",
+    pose_rule="fraction",
+    scale="stroke_max",
+    dropout_s=0.0,
+    static_still="velocity",
+    static_while_stabilizing=False,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +196,20 @@ class HandSample:
     """Fingertip velocity in palm lengths per second (image axes, y down)."""
     palm_velocity: tuple[float, float]
     palm_length_px: float
+    scale_px: float = 0.0
+    """Rotation-tolerant hand scale of this frame (``pose.hand_scale_px``); 0 = use the palm
+    length."""
+
+    @property
+    def fingertip_velocity_px(self) -> Vector:
+        return (
+            self.fingertip_velocity[0] * self.palm_length_px,
+            self.fingertip_velocity[1] * self.palm_length_px,
+        )
+
+    @property
+    def frame_scale_px(self) -> float:
+        return self.scale_px if self.scale_px > 0 else self.palm_length_px
 
 
 @dataclass(slots=True)
@@ -156,7 +277,7 @@ def dominant_direction(vector: Vector) -> tuple[GestureType, float, float]:
 class _LastSwipe:
     gesture: GestureType
     start_px: Vector
-    """Image position where the confirmed stroke started."""
+    """Image position where the stroke started."""
     length_palms: float
     """Stroke length along its direction, followed to the end of the movement."""
     end_ns: int
@@ -165,6 +286,47 @@ class _LastSwipe:
     settled_since_ns: int | None = None
     returned: bool = False
     """The hand came back and paused: the return phase is over."""
+    confirmed: bool = True
+    """False for a stroke that met the criteria but was not allowed to confirm (cooldown,
+    not yet armed, disabled direction); its return is suppressed all the same."""
+
+
+@dataclass(slots=True)
+class _Stroke:
+    gesture: GestureType
+    direction: Vector
+    start_ns: int
+    start_pos: Vector
+    palm_start: Vector
+    scale_px: float
+    blocked: str
+    """Why the stroke may not confirm (a ``RejectCode``), or empty if it may."""
+    origin_pose: bool
+    is_return: bool
+    peak_px: float = 0.0
+    frames: int = 1
+    pose_frames: int = 0
+    stall_since_ns: int | None = None
+    turn: tuple[float, Vector, int] = (0.0, (0.0, 0.0), 0)
+    """(furthest displacement along the direction, its position, its timestamp)."""
+    observed: bool = False
+    """Already remembered as a (blocked) swipe for return suppression."""
+    qualified_ns: int = 0
+    """``confirm="end"``: when the stroke met every criterion (0 = not yet)."""
+    onset_seen: bool = True
+    """The recognizer saw the hand before this stroke started (it was not already moving when
+    it was detected)."""
+
+
+@dataclass(slots=True)
+class _PendingFlick:
+    stroke: _Stroke
+    length_palms: float
+    peak_palms_s: float
+    elapsed_s: float
+    qualified_ns: int
+    palm: Vector
+    track_id: int
 
 
 class DirectionalSwipeRecognizer:
@@ -175,55 +337,70 @@ class DirectionalSwipeRecognizer:
         settings: GestureSettings,
         pose_ok: Callable[[HandPose], bool],
         pose_fraction: float = 0.6,
+        options: RecognizerOptions | None = None,
     ) -> None:
         self.settings = settings
         self.pose_ok = pose_ok
         self.pose_fraction = pose_fraction
+        self.options = options or RecognizerOptions()
         self.enabled: frozenset[GestureType] = frozenset(SWIPE_DIRECTIONS)
         """Directions that may confirm. Disabled directions are still followed (so their
         movement cannot be misread as another direction) but are rejected."""
         self.phase = GesturePhase.REARMING
-        self._still_since_ns: int | None = None
-        self._rearm_still_s = INITIAL_REARM_STILL_S
-        self._phase_until_ns = 0
+        self._cooldown_until_ns = 0
         self._last: _LastSwipe | None = None
-        self._rest: tuple[Vector, int] | None = None
-        self._reset_stroke()
+        self.reset()
 
     @property
     def gestures(self) -> tuple[GestureType, ...]:
         return tuple(SWIPE_DIRECTIONS)
 
-    def _reset_stroke(self) -> None:
-        self._gesture = GestureType.INDEX_SWIPE_DOWN
-        self._dir: Vector = (0.0, 1.0)
-        self._start_ns = 0
-        self._start_pos: Vector = (0.0, 0.0)
-        self._palm_start: Vector = (0.0, 0.0)
-        self._peak_px = 0.0
-        self._scale_px = 0.0
-        self._frames = 0
-        self._pose_frames = 0
-        self._stall_since_ns: int | None = None
-        self._turn: tuple[float, Vector, int] = (0.0, (0.0, 0.0), 0)
-        """(furthest displacement along the direction, its position, its timestamp)."""
-        self._return = False
+    @property
+    def last_swipe(self) -> _LastSwipe | None:
+        return self._last
 
     def reset(self, rearm: bool = True) -> None:
         """Forget any stroke (tracking loss or a new control hand)."""
-        self._reset_stroke()
-        self._rest = None
-        self.phase = GesturePhase.REARMING if rearm else GesturePhase.IDLE
-        self._still_since_ns = None
-        self._rearm_still_s = INITIAL_REARM_STILL_S
+        self._stroke: _Stroke | None = None
+        self._rest: tuple[Vector, int] | None = None
+        self._armed = not rearm
+        self._seen_slow = not rearm
+        """A sample slower than ``START_SPEED`` was seen since the reset, so the onset of the
+        current stroke was observed (it did not begin before the hand was detected)."""
+        self._still_since_ns: int | None = None
         self._last = None
+        self._scale: float | None = None
+        self._scale_ns: int | None = None
+        self._pose_history: deque[tuple[int, bool]] = deque()
+        self._flick: _PendingFlick | None = None
+        self.phase = GesturePhase.REARMING if rearm else GesturePhase.IDLE
 
     def block_until(self, timestamp_ns: int) -> None:
         """Global cooldown imposed by another recognizer's confirmation."""
-        if self.phase is GesturePhase.CANDIDATE:
-            self._reset_stroke()
+        self._stroke = None
+        self._flick = None
+        self._cooldown_until_ns = max(self._cooldown_until_ns, timestamp_ns)
         self.phase = GesturePhase.COOLDOWN
-        self._phase_until_ns = max(self._phase_until_ns, timestamp_ns)
+
+    # ------------------------------------------------------------------ helpers
+
+    def _update_scale(self, sample: HandSample) -> None:
+        frame_scale = sample.frame_scale_px
+        if self.options.scale == "stroke_max":
+            self._scale = sample.palm_length_px
+            return
+        if self._scale is None or self._scale_ns is None:
+            self._scale = frame_scale
+        else:
+            dt = _seconds(sample.timestamp_ns - self._scale_ns)
+            alpha = 1.0 - math.exp(-max(dt, 0.0) / SCALE_TIME_CONSTANT_S)
+            self._scale += alpha * (frame_scale - self._scale)
+        self._scale_ns = sample.timestamp_ns
+
+    def _current_scale(self, sample: HandSample) -> float:
+        if self._stroke is not None:
+            return self._stroke.scale_px
+        return self._scale if self._scale else sample.frame_scale_px
 
     @staticmethod
     def _displacement(position: Vector, origin: Vector, scale: float) -> Vector:
@@ -251,49 +428,107 @@ class DirectionalSwipeRecognizer:
         else:
             last.settled_since_ns = None
 
-    def _last_returned(self) -> bool:
-        return self._last is None or self._last.returned
-
     def _is_return(self, gesture: GestureType, start_ns: int) -> bool:
         last = self._last
         if last is None or last.returned or OPPOSITE[last.gesture] is not gesture:
             return False
         return _seconds(start_ns - last.end_ns) <= self.settings.return_window_s
 
+    def _recent_pose(self, ts: int) -> bool:
+        cutoff = ts - int(POSE_WINDOW_S * NS_PER_S)
+        window = [ok for t, ok in self._pose_history if t >= cutoff]
+        hits = sum(window)
+        return hits >= ORIGIN_POSE_MIN_FRAMES and hits >= ORIGIN_POSE_FRACTION * len(window)
+
+    def _pose_accepted(self, stroke: _Stroke, pose_now: bool) -> str:
+        """ "now" (confirm), "flick" (wait for the finger to extend again) or "" (reject)."""
+        fraction = stroke.pose_frames / stroke.frames
+        if self.options.pose_rule == "fraction":
+            return "now" if fraction >= self.pose_fraction and stroke.pose_frames >= 2 else ""
+        if pose_now and (stroke.origin_pose or fraction >= ENDPOINT_POSE_FRACTION):
+            return "now"
+        if stroke.origin_pose:
+            return "flick"
+        return ""
+
+    def _arm(self, sample: HandSample, speed: float, axis_speed: float) -> None:
+        """Arming of a newly acquired hand (see the module documentation)."""
+        if axis_speed < START_SPEED:
+            self._seen_slow = True
+        if self._armed:
+            return
+        ts = sample.timestamp_ns
+        if self.options.arming == "observe":
+            if axis_speed < STALL_SPEED:
+                self._armed = True
+            return
+        if speed <= self.settings.rearm_max_speed_palms_s:
+            if self._still_since_ns is None:
+                self._still_since_ns = ts
+            if _seconds(ts - self._still_since_ns) >= INITIAL_REARM_STILL_S:
+                self._armed = True
+        else:
+            self._still_since_ns = None
+
+    def _blocked_code(self, ts: int) -> str:
+        if not self._armed:
+            return RejectCode.NOT_ARMED
+        if ts < self._cooldown_until_ns:
+            return RejectCode.COOLDOWN
+        return ""
+
+    def _update_phase(self, ts: int) -> None:
+        if self._flick is not None or (self._stroke is not None and not self._stroke.blocked):
+            self.phase = GesturePhase.CANDIDATE
+        elif ts < self._cooldown_until_ns:
+            self.phase = GesturePhase.COOLDOWN
+        elif not self._armed:
+            self.phase = GesturePhase.REARMING
+        else:
+            self.phase = GesturePhase.IDLE
+
+    # ------------------------------------------------------------------ update
+
     def update(self, sample: HandSample) -> Step:
         ts = sample.timestamp_ns
         position = sample.fingertip
-        v_user = to_user(sample.fingertip_velocity)
+        pose_now = self.pose_ok(sample.pose)
+        self._pose_history.append((ts, pose_now))
+        cutoff = ts - int(2 * POSE_WINDOW_S * NS_PER_S)
+        while self._pose_history and self._pose_history[0][0] < cutoff:
+            self._pose_history.popleft()
+        if self._stroke is None:
+            self._update_scale(sample)
+        scale = self._current_scale(sample)
+        vx, vy = sample.fingertip_velocity_px
+        v_user = to_user((vx / scale, vy / scale))
         speed = math.hypot(*v_user)
         self._follow_last(sample, v_user, speed)
-        if self.phase is GesturePhase.CANDIDATE and self._return and self._last_returned():
-            # The hand came back and paused: whatever moves next is a new, deliberate stroke.
-            self._reset_stroke()
-            self.phase = GesturePhase.IDLE
-            self._rest = (position, ts)
+        flick = self._resolve_flick(sample, pose_now)
+        if flick is not None:
+            self._update_phase(ts)
+            return flick
 
-        if self.phase is GesturePhase.CONFIRMED:
-            self.phase = GesturePhase.COOLDOWN
-        if self.phase is GesturePhase.COOLDOWN:
-            if ts < self._phase_until_ns:
-                return Step()
-            self.phase = GesturePhase.REARMING
-            self._still_since_ns = None
-        if self.phase is GesturePhase.REARMING:
-            if speed <= self.settings.rearm_max_speed_palms_s:
-                if self._still_since_ns is None:
-                    self._still_since_ns = ts
-                if _seconds(ts - self._still_since_ns) >= self._rearm_still_s:
-                    self.phase = GesturePhase.IDLE
-            else:
-                self._still_since_ns = None
+        stroke = self._stroke
+        if stroke is not None and stroke.is_return and (self._last is None or self._last.returned):
+            # The hand came back and paused: whatever moves next is a new, deliberate stroke.
+            self._stroke = None
+            self._rest = (position, ts)
+            stroke = None
+
+        gesture, v_axis, v_cross = dominant_direction(v_user)
+        self._arm(sample, speed, v_axis)
+        if self.options.arming == "still" and not self._armed:
+            # Version 0.3: nothing is followed before the hand has been still.
+            self._rest = None
+            self._update_phase(ts)
             return Step()
 
-        if self.phase is GesturePhase.IDLE:
-            gesture, v_axis, v_cross = dominant_direction(v_user)
+        if stroke is None:
             if v_axis < STALL_SPEED or self._rest is None:
                 self._rest = (position, ts)
             if v_axis < START_SPEED or v_axis < v_cross:
+                self._update_phase(ts)
                 return Step()
             # Measure the stroke from where the fingertip last rested, not from the frame where
             # its speed crossed the start threshold (part of the stroke is already done then).
@@ -301,114 +536,323 @@ class DirectionalSwipeRecognizer:
             if _seconds(ts - rest_ts) > MAX_REST_AGE_S:
                 rest_pos, rest_ts = position, ts
             self._rest = None
-            return self._begin(gesture, rest_pos, rest_ts, sample)
+            step = self._begin(gesture, rest_pos, rest_ts, sample, pose_now)
+            self._update_phase(ts)
+            return step
 
-        return self._update_candidate(sample, v_user)
+        step = self._update_stroke(stroke, sample, v_user, pose_now)
+        self._update_phase(ts)
+        return step
 
-    def _update_candidate(self, sample: HandSample, v_user: Vector) -> Step:
+    def _remember(self, stroke: _Stroke, length: float, ts: int, confirmed: bool) -> None:
+        self._last = _LastSwipe(
+            stroke.gesture, stroke.start_pos, length, ts, stroke.scale_px, confirmed=confirmed
+        )
+
+    def _update_stroke(
+        self, stroke: _Stroke, sample: HandSample, v_user: Vector, pose_now: bool
+    ) -> Step:
         ts = sample.timestamp_ns
         s = self.settings
-        gesture = self._gesture
-        direction = self._dir
-        self._frames += 1
-        self._pose_frames += self.pose_ok(sample.pose)
-        # The palm looks shorter while the hand is turned edge-on; the largest palm length seen
-        # during the stroke is the best estimate of the hand's real size.
-        self._scale_px = max(self._scale_px, sample.palm_length_px)
-        scale = self._scale_px
+        gesture = stroke.gesture
+        direction = stroke.direction
+        stroke.frames += 1
+        stroke.pose_frames += pose_now
+        if self.options.scale == "stroke_max":
+            # Version 0.3: the largest palm length seen during the stroke.
+            stroke.scale_px = max(stroke.scale_px, sample.palm_length_px)
+        scale = stroke.scale_px
         v_axis = _dot(v_user, direction)
-        self._peak_px = max(self._peak_px, v_axis * sample.palm_length_px)
-        peak = self._peak_px / scale
-        d = self._displacement(sample.fingertip, self._start_pos, scale)
+        stroke.peak_px = max(stroke.peak_px, v_axis * scale)
+        peak = stroke.peak_px / scale
+        d = self._displacement(sample.fingertip, stroke.start_pos, scale)
         d_axis = _dot(d, direction)
         d_cross = _across(d, direction)
-        if d_axis > self._turn[0]:
-            self._turn = (d_axis, sample.fingertip, ts)
-        elapsed = _seconds(ts - self._start_ns)
-        fraction = self._pose_frames / self._frames
+        if d_axis > stroke.turn[0]:
+            stroke.turn = (d_axis, sample.fingertip, ts)
+        elapsed = _seconds(ts - stroke.start_ns)
 
-        def reject(reason: str) -> Step:
+        def reject(
+            code: str,
+            reason: str,
+            measured: float | None = None,
+            required: float | None = None,
+            unit: str = "",
+        ) -> Step:
             # A rejected stroke may flow directly into a real one, so the recognizer is
             # immediately idle again.
-            self._reset_stroke()
-            self.phase = GesturePhase.IDLE
-            return Step(rejection=GestureRejection(gesture, reason, ts))
-
-        if d_axis >= s.swipe_min_distance_palms:
-            if d_cross * s.direction_ratio > d_axis:
-                return reject("diagonal movement")
-            if peak < s.swipe_min_speed_palms_s:
-                return reject("too slow")
-            if fraction < self.pose_fraction or self._pose_frames < 2:
-                return reject("pose not held (pointing finger required)")
-            if self._return:
-                return reject("return movement after previous swipe")
-            if gesture not in self.enabled:
-                # Still remembered as a swipe, so its own return is suppressed as well.
-                self._last = _LastSwipe(gesture, self._start_pos, d_axis, ts, scale)
-                return reject("gesture disabled")
-            palm = self._displacement(sample.palm, self._palm_start, scale)
-            event = GestureEvent(
-                gesture=gesture,
-                timestamp_ns=ts,
-                track_id=sample.track_id,
-                handedness=sample.handedness,
-                direction=DIRECTION_NAMES[gesture],
-                magnitude_palms=round(d_axis, 3),
-                peak_speed_palms_s=round(peak, 3),
-                duration_s=round(elapsed, 3),
-                palm_magnitude_palms=round(_dot(palm, direction), 3),
+            self._stroke = None
+            return Step(
+                rejection=GestureRejection(
+                    gesture, reason, ts, code, _round(measured), _round(required), unit
+                )
             )
-            self._last = _LastSwipe(gesture, self._start_pos, d_axis, ts, scale)
-            self._reset_stroke()
-            self._rearm_still_s = s.rearm_still_s
-            self.phase = GesturePhase.CONFIRMED
-            self._phase_until_ns = ts + int(s.cooldown_s * NS_PER_S)
-            return Step(event=event)
+
+        if d_axis >= s.swipe_min_distance_palms and not stroke.observed:
+            if d_cross * s.direction_ratio > d_axis:
+                angle = math.degrees(math.atan2(d_cross, d_axis))
+                limit = math.degrees(math.atan2(1.0, s.direction_ratio))
+                return reject(RejectCode.DIAGONAL, "diagonal movement", angle, limit, "deg")
+            if peak < s.swipe_min_speed_palms_s:
+                return reject(
+                    RejectCode.TOO_SLOW, "too slow", peak, s.swipe_min_speed_palms_s, "palms/s"
+                )
+            pose_verdict = self._pose_accepted(stroke, pose_now)
+            if not pose_verdict:
+                fraction = stroke.pose_frames / stroke.frames
+                return reject(
+                    RejectCode.POSE,
+                    "pose not held (pointing finger required)",
+                    fraction,
+                    self.pose_fraction
+                    if self.options.pose_rule == "fraction"
+                    else ENDPOINT_POSE_FRACTION,
+                    "fraction",
+                )
+            if stroke.is_return:
+                return reject(RejectCode.RETURN, "return movement after previous swipe")
+            if stroke.blocked or gesture not in self.enabled:
+                # Followed but not allowed to confirm: remembered so that its own return is
+                # suppressed as well, and followed to its end. A movement that was already
+                # under way when the hand was detected (raising the hand into view) is not a
+                # swipe at all and is not remembered: the next deliberate stroke may go in
+                # the opposite direction.
+                if stroke.onset_seen:
+                    self._remember(stroke, d_axis, ts, confirmed=False)
+                stroke.observed = True
+                if gesture not in self.enabled:
+                    return Step(
+                        rejection=GestureRejection(
+                            gesture, "gesture disabled", ts, RejectCode.DISABLED
+                        )
+                    )
+                if stroke.blocked == RejectCode.COOLDOWN:
+                    remaining = _seconds(self._cooldown_until_ns - ts)
+                    return Step(
+                        rejection=GestureRejection(
+                            gesture,
+                            "too soon after the previous gesture",
+                            ts,
+                            RejectCode.COOLDOWN,
+                            _round(remaining),
+                            None,
+                            "s",
+                        )
+                    )
+                return Step(
+                    rejection=GestureRejection(
+                        gesture,
+                        "hand was already moving when it was detected",
+                        ts,
+                        RejectCode.NOT_ARMED,
+                    )
+                )
+            if pose_verdict == "flick":
+                # Remembered so the finger's re-extension is not read as a swipe up.
+                self._remember(stroke, d_axis, ts, confirmed=False)
+                stroke.observed = True
+                self._flick = _PendingFlick(
+                    stroke, d_axis, peak, elapsed, ts, sample.palm, sample.track_id
+                )
+                return Step(candidate=GestureCandidate(gesture, 1.0, elapsed))
+            if self.options.confirm == "end":
+                if not stroke.qualified_ns:
+                    stroke.qualified_ns = ts
+                if d_axis > MAX_TRAVEL_PALMS:
+                    return reject(
+                        RejectCode.TOO_FAR,
+                        "movement continued too far (not a swipe)",
+                        d_axis,
+                        MAX_TRAVEL_PALMS,
+                        "palms",
+                    )
+                waited = _seconds(ts - stroke.qualified_ns)
+                if v_axis >= STALL_SPEED and waited < END_WAIT_MAX_S:
+                    return Step(candidate=GestureCandidate(gesture, 1.0, elapsed))
+            return self._confirm(stroke, sample, d_axis, peak, elapsed)
         if v_axis <= -START_SPEED or d_axis < -0.2:
             # Reversal: the opposite stroke starts from the turning point, so a wind-up that
             # flows straight into the real movement does not cut the real stroke short.
-            _, turn_pos, turn_ts = self._turn
-            rejection = reject("direction reversed").rejection
-            step = self._begin(OPPOSITE[gesture], turn_pos, turn_ts, sample)
+            _, turn_pos, turn_ts = stroke.turn
+            rejection = None
+            if not stroke.observed and not stroke.is_return:
+                rejection = reject(
+                    RejectCode.TOO_SHORT,
+                    "direction reversed",
+                    max(0.0, stroke.turn[0]),
+                    s.swipe_min_distance_palms,
+                    "palms",
+                ).rejection
+            self._stroke = None
+            step = self._begin(OPPOSITE[gesture], turn_pos, turn_ts, sample, pose_now)
             step.rejection = rejection
             return step
+        if stroke.observed:
+            if v_axis < STALL_SPEED:
+                self._stroke = None
+            return Step()
         if elapsed > s.swipe_max_duration_s:
-            return reject("too slow")
+            return reject(RejectCode.TOO_LONG, "too slow", elapsed, s.swipe_max_duration_s, "s")
         if d_cross > max(0.6, d_axis):
-            return reject("diagonal movement")
+            angle = math.degrees(math.atan2(d_cross, max(d_axis, 1e-6)))
+            limit = math.degrees(math.atan2(1.0, s.direction_ratio))
+            return reject(RejectCode.DIAGONAL, "diagonal movement", angle, limit, "deg")
         if v_axis < STALL_SPEED:
-            if self._stall_since_ns is None:
-                self._stall_since_ns = ts
-            elif _seconds(ts - self._stall_since_ns) >= STALL_TIME_S:
-                return reject("movement too short")
+            if stroke.stall_since_ns is None:
+                stroke.stall_since_ns = ts
+            elif _seconds(ts - stroke.stall_since_ns) >= STALL_TIME_S:
+                return reject(
+                    RejectCode.TOO_SHORT,
+                    "movement too short",
+                    max(0.0, d_axis),
+                    s.swipe_min_distance_palms,
+                    "palms",
+                )
         else:
-            self._stall_since_ns = None
-        # A return movement is never shown as an upcoming gesture.
-        progress = 0.0 if self._return else max(0.0, min(1.0, d_axis / s.swipe_min_distance_palms))
+            stroke.stall_since_ns = None
+        if stroke.is_return or stroke.blocked:
+            # A return movement or a blocked stroke is never shown as an upcoming gesture.
+            return Step()
+        progress = max(0.0, min(1.0, d_axis / s.swipe_min_distance_palms))
         return Step(candidate=GestureCandidate(gesture, progress, elapsed))
 
-    def _begin(
-        self, gesture: GestureType, start_pos: Vector, start_ns: int, sample: HandSample
+    def _resolve_flick(self, sample: HandSample, pose_now: bool) -> Step | None:
+        """Confirm a pending flick once the finger extends again, reject it if it does not."""
+        flick = self._flick
+        if flick is None:
+            return None
+        ts = sample.timestamp_ns
+        waited = _seconds(ts - flick.qualified_ns)
+        stroke = flick.stroke
+        _, turn_pos, _ = stroke.turn
+        back = -_dot(
+            self._displacement(sample.fingertip, turn_pos, stroke.scale_px), stroke.direction
+        )
+        if (pose_now or back >= FLICK_RECOVERY_PALMS) and ts > flick.qualified_ns:
+            self._flick = None
+            stroke = flick.stroke
+            stroke.qualified_ns = flick.qualified_ns
+            if self._last is not None and self._last.gesture is stroke.gesture:
+                self._last.confirmed = True
+            event = GestureEvent(
+                gesture=stroke.gesture,
+                timestamp_ns=ts,
+                track_id=flick.track_id,
+                handedness=sample.handedness,
+                direction=DIRECTION_NAMES[stroke.gesture],
+                magnitude_palms=round(flick.length_palms, 3),
+                peak_speed_palms_s=round(flick.peak_palms_s, 3),
+                duration_s=round(flick.elapsed_s, 3),
+                palm_magnitude_palms=round(
+                    _dot(
+                        self._displacement(flick.palm, stroke.palm_start, stroke.scale_px),
+                        stroke.direction,
+                    ),
+                    3,
+                ),
+                decision_delay_s=round(waited, 3),
+            )
+            self._cooldown_until_ns = ts + int(self.settings.cooldown_s * NS_PER_S)
+            self.phase = GesturePhase.CONFIRMED
+            return Step(event=event)
+        if waited > FLICK_REEXTEND_S:
+            self._flick = None
+            return Step(
+                rejection=GestureRejection(
+                    flick.stroke.gesture,
+                    "finger stayed curled (relaxing the hand is not a swipe)",
+                    ts,
+                    RejectCode.POSE,
+                    round(waited, 3),
+                    FLICK_REEXTEND_S,
+                    "s",
+                )
+            )
+        return None
+
+    def _confirm(
+        self, stroke: _Stroke, sample: HandSample, d_axis: float, peak: float, elapsed: float
     ) -> Step:
-        if not self.pose_ok(sample.pose):
-            self.phase = GesturePhase.IDLE
+        ts = sample.timestamp_ns
+        direction = stroke.direction
+        palm = self._displacement(sample.palm, stroke.palm_start, stroke.scale_px)
+        event = GestureEvent(
+            gesture=stroke.gesture,
+            timestamp_ns=ts,
+            track_id=sample.track_id,
+            handedness=sample.handedness,
+            direction=DIRECTION_NAMES[stroke.gesture],
+            magnitude_palms=round(d_axis, 3),
+            peak_speed_palms_s=round(peak, 3),
+            duration_s=round(elapsed, 3),
+            palm_magnitude_palms=round(_dot(palm, direction), 3),
+            decision_delay_s=round(_seconds(ts - stroke.qualified_ns), 3)
+            if stroke.qualified_ns
+            else 0.0,
+        )
+        self._remember(stroke, d_axis, ts, confirmed=True)
+        self._stroke = None
+        self._cooldown_until_ns = ts + int(self.settings.cooldown_s * NS_PER_S)
+        self.phase = GesturePhase.CONFIRMED
+        return Step(event=event)
+
+    def _begin(
+        self,
+        gesture: GestureType,
+        start_pos: Vector,
+        start_ns: int,
+        sample: HandSample,
+        pose_now: bool,
+    ) -> Step:
+        ts = sample.timestamp_ns
+        if self.options.pose_rule == "fraction" and not pose_now:
             return Step()
-        self.phase = GesturePhase.CANDIDATE
-        self._gesture = gesture
-        self._dir = SWIPE_DIRECTIONS[gesture]
-        self._start_ns = start_ns
-        self._start_pos = start_pos
-        self._palm_start = sample.palm
-        self._turn = (0.0, start_pos, start_ns)
-        self._frames = 1
-        self._pose_frames = 1
-        self._scale_px = sample.palm_length_px
-        v_axis = _dot(to_user(sample.fingertip_velocity), self._dir)
-        self._peak_px = max(0.0, v_axis) * sample.palm_length_px
-        self._stall_since_ns = None
-        self._return = self._is_return(gesture, sample.timestamp_ns)
+        scale = self._current_scale(sample)
+        if self.options.scale == "stroke_max":
+            scale = sample.palm_length_px
+        stroke = _Stroke(
+            gesture=gesture,
+            direction=SWIPE_DIRECTIONS[gesture],
+            start_ns=start_ns,
+            start_pos=start_pos,
+            palm_start=sample.palm,
+            scale_px=scale,
+            blocked=self._blocked_code(ts),
+            origin_pose=self._recent_pose(ts),
+            is_return=self._is_return(gesture, ts),
+            pose_frames=int(pose_now),
+            turn=(0.0, start_pos, start_ns),
+            onset_seen=self._seen_slow,
+        )
+        vx, vy = sample.fingertip_velocity_px
+        v_axis = _dot(to_user((vx / scale, vy / scale)), stroke.direction)
+        stroke.peak_px = max(0.0, v_axis) * scale
+        self._stroke = stroke
+        if stroke.is_return or stroke.blocked:
+            return Step()
         return Step(candidate=GestureCandidate(gesture, 0.0, 0.0))
+
+
+def _round(value: float | None) -> float | None:
+    return None if value is None else round(value, 3)
+
+
+@dataclass(slots=True)
+class _Drift:
+    samples: deque[tuple[int, Vector]] = field(default_factory=deque)
+
+    def add(self, ts: int, position: Vector) -> None:
+        self.samples.append((ts, position))
+        cutoff = ts - int(STATIC_WINDOW_S * NS_PER_S)
+        while len(self.samples) > 1 and self.samples[0][0] < cutoff:
+            self.samples.popleft()
+
+    def drift_px(self) -> float:
+        if len(self.samples) < 2:
+            return 0.0
+        xs = [p[0] for _, p in self.samples]
+        ys = [p[1] for _, p in self.samples]
+        return math.hypot(max(xs) - min(xs), max(ys) - min(ys))
 
 
 class StaticPoseRecognizer:
@@ -420,16 +864,22 @@ class StaticPoseRecognizer:
         pose_ok: Callable[[HandPose], bool],
         hold_s: Callable[[], float],
         settings: GestureSettings,
+        options: RecognizerOptions | None = None,
+        describe: Callable[[HandPose], tuple[str, ...]] | None = None,
     ) -> None:
         self.gesture = gesture
         self.pose_ok = pose_ok
         self.hold_s = hold_s
         self.settings = settings
+        self.options = options or RecognizerOptions()
+        self.describe = describe
+        """Optional: the unmet conditions of a pose that is close but not recognized."""
         self.phase = GesturePhase.IDLE
         self._start_ns = 0
         self._last_pose_ns: int | None = None
         self._absent_since_ns: int | None = None
         self._phase_until_ns = 0
+        self._drift = _Drift()
 
     @property
     def gestures(self) -> tuple[GestureType]:
@@ -439,6 +889,7 @@ class StaticPoseRecognizer:
         self.phase = GesturePhase.REARMING if rearm else GesturePhase.IDLE
         self._last_pose_ns = None
         self._absent_since_ns = None
+        self._drift = _Drift()
 
     def block_until(self, timestamp_ns: int) -> None:
         if self.phase is GesturePhase.CANDIDATE:
@@ -447,16 +898,27 @@ class StaticPoseRecognizer:
             self.phase = GesturePhase.COOLDOWN
         self._phase_until_ns = max(self._phase_until_ns, timestamp_ns)
 
-    def cancel(self, timestamp_ns: int, reason: str) -> Step:
+    def cancel(
+        self, timestamp_ns: int, reason: str, code: str = RejectCode.CANCELLED, **values
+    ) -> Step:
         if self.phase is not GesturePhase.CANDIDATE:
             return Step()
         self.phase = GesturePhase.IDLE
-        return Step(rejection=GestureRejection(self.gesture, reason, timestamp_ns))
+        return Step(rejection=GestureRejection(self.gesture, reason, timestamp_ns, code, **values))
+
+    def _still(self, sample: HandSample) -> tuple[bool, float]:
+        """(still, drift in palms over the window or speed in palms/s)."""
+        if self.options.static_still == "velocity":
+            speed = math.hypot(*sample.palm_velocity)
+            return speed <= self.settings.static_max_speed_palms_s, speed
+        self._drift.add(sample.timestamp_ns, sample.palm)
+        drift = self._drift.drift_px() / sample.frame_scale_px
+        return drift <= STATIC_MAX_DRIFT_PALMS, drift
 
     def update(self, sample: HandSample) -> Step:
         ts = sample.timestamp_ns
         present = self.pose_ok(sample.pose)
-        still = math.hypot(*sample.palm_velocity) <= self.settings.static_max_speed_palms_s
+        still, motion = self._still(sample)
         if present:
             self._last_pose_ns = ts
             self._absent_since_ns = None
@@ -486,14 +948,39 @@ class StaticPoseRecognizer:
             return Step()
 
         # CANDIDATE
-        if not still:
-            return self.cancel(ts, "hand moving")
-        if not present:
-            gap = _seconds(ts - (self._last_pose_ns or ts))
-            if gap > POSE_DROPOUT_S:
-                return self.cancel(ts, "pose released before hold time")
         held = _seconds(ts - self._start_ns)
         required = self.hold_s()
+        if not still:
+            limit = (
+                self.settings.static_max_speed_palms_s
+                if self.options.static_still == "velocity"
+                else STATIC_MAX_DRIFT_PALMS
+            )
+            unit = "palms/s" if self.options.static_still == "velocity" else "palms"
+            return self.cancel(
+                ts,
+                "hand moving",
+                RejectCode.HAND_MOVING,
+                measured=_round(motion),
+                required=limit,
+                unit=unit,
+            )
+        if not present:
+            gap = _seconds(ts - (self._last_pose_ns or ts))
+            dropout = POSE_DROPOUT_S
+            if self.options.static_still == "window":
+                dropout = max(POSE_DROPOUT_S, self.options.dropout_s)
+            if gap > dropout:
+                details = self.describe(sample.pose) if self.describe else ()
+                return self.cancel(
+                    ts,
+                    "pose released before hold time",
+                    RejectCode.RELEASED,
+                    measured=_round(held),
+                    required=required,
+                    unit="s",
+                    details=details,
+                )
         if held >= required and present:
             self.phase = GesturePhase.CONFIRMED
             self._phase_until_ns = ts + int(self.settings.cooldown_s * NS_PER_S)

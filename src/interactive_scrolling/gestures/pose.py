@@ -9,6 +9,24 @@ visibly straight fingers measure 55-100 degrees (see docs/architecture/GESTURES.
 For each finger the *flexion* is the sum of the bend angles at its three joints (degrees):
 about 0-40 for a straight finger and 180-300 for a finger folded into a fist.
 
+Hybrid finger states (Brief 004)
+--------------------------------
+MediaPipe's relative depth becomes noisy on small hands (a hand further from the camera): on
+labeled recordings an open palm about 86 px long measured a median flexion of 104-131 degrees
+per finger, so the 3D rule alone called a visibly open hand "other" (the main cause of the
+stop pose's 0/3). Two image-space measurements do not depend on depth:
+
+* *straightness* = knuckle-to-tip distance / summed segment lengths (1.0 = straight). A
+  straight finger stays straight in any projection; a curled one does not (labeled frames:
+  extended median 1.00, 25th percentile 0.98; curled 95th percentile 0.83);
+* *reach* = knuckle-to-tip distance / hand scale, which rejects curled fingers that happen to
+  project as a short straight line (extended 25th percentile 0.62, curled 95th 0.51).
+
+A finger is EXTENDED if the 3D rule says so or if it is straight (>= ``STRAIGHT_2D_MIN``) with
+enough reach (>= ``REACH_2D_MIN``); it is CURLED if the 3D rule says curled and the image does not
+show a straight, reaching finger, or if the image shows it clearly bent. ``finger_model="3d"``
+keeps the version 0.3 rule for comparison (scripts/evaluate_gestures.py).
+
 Image-space directions (``thumb_up_alignment``, ``fingers_up_alignment``) use the unmirrored
 frame with y pointing down; an alignment of 1.0 means pointing straight up.
 
@@ -37,7 +55,7 @@ from __future__ import annotations
 
 import enum
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -69,6 +87,14 @@ HEART_MIN_THUMB_DOWN = math.cos(math.radians(70))
 HEART_MIN_THUMB_BELOW = 0.25
 HEART_GAP = (0.3, 2.2)
 HEART_MIN_UPRIGHT = math.cos(math.radians(65))
+# Hybrid finger states (image space).
+STRAIGHT_2D_MIN = 0.9
+REACH_2D_MIN = 0.55
+BENT_2D_MAX = 0.6
+PALM_WIDTH_RATIO = 0.8
+"""Typical index-knuckle to little-finger-knuckle width / palm length; the hand scale is the
+larger of the palm length and width / ratio, so it stays stable when the hand turns."""
+FINGER_MODELS = ("hybrid", "3d")
 
 
 class FingerState(enum.Enum):
@@ -99,6 +125,10 @@ class HandPose:
     """The thumb tip is above every other landmark in the image."""
     label: PoseLabel
     heart: HeartGeometry | None = None
+    straightness: dict[str, float] | None = None
+    """Image-space straightness per finger (index..pinky), 1.0 = straight."""
+    scale_px: float = 0.0
+    """Hand scale in source pixels: max(palm length, palm width / ``PALM_WIDTH_RATIO``)."""
 
     def extended(self, *fingers: str) -> bool:
         return all(self.states[f] is FingerState.EXTENDED for f in fingers)
@@ -206,7 +236,36 @@ def _classify_finger(flexion: float, extended_max: float, curled_min: float) -> 
     return FingerState.UNCERTAIN
 
 
-def analyze_pose(obs: HandObservation, width: int, height: int) -> HandPose:
+def hand_scale_px(image: np.ndarray) -> float:
+    """Rotation-tolerant hand size in pixels from image-space landmarks (21 x 2)."""
+    length = float(np.linalg.norm(image[L.MIDDLE_FINGER_MCP] - image[L.WRIST]))
+    width = float(np.linalg.norm(image[L.INDEX_FINGER_MCP] - image[L.PINKY_MCP]))
+    return max(length, width / PALM_WIDTH_RATIO)
+
+
+def _image_finger(image: np.ndarray, chain: tuple[int, int, int, int], scale: float):
+    mcp, pip, dip, tip = (image[i] for i in chain)
+    path = float(np.linalg.norm(pip - mcp) + np.linalg.norm(dip - pip) + np.linalg.norm(tip - dip))
+    chord = float(np.linalg.norm(tip - mcp))
+    straightness = chord / path if path > 1e-6 else 0.0
+    reach = chord / scale if scale > 1e-6 else 0.0
+    return straightness, reach
+
+
+def _hybrid_state(state_3d: FingerState, straightness: float, reach: float) -> FingerState:
+    """The image measurement decides only where the 3D angle is uncertain."""
+    if state_3d is not FingerState.UNCERTAIN:
+        return state_3d
+    if straightness >= STRAIGHT_2D_MIN and reach >= REACH_2D_MIN:
+        return FingerState.EXTENDED
+    if straightness <= BENT_2D_MAX:
+        return FingerState.CURLED
+    return FingerState.UNCERTAIN
+
+
+def analyze_pose(
+    obs: HandObservation, width: int, height: int, finger_model: str = "3d"
+) -> HandPose:
     pts = _points_3d(obs, width, height)
     wrist = pts[L.WRIST]
     flexion: dict[str, float] = {}
@@ -226,6 +285,13 @@ def analyze_pose(obs: HandObservation, width: int, height: int) -> HandPose:
     states["thumb"] = _classify_finger(flexion["thumb"], THUMB_EXTENDED_MAX, THUMB_CURLED_MIN)
 
     image = obs.landmarks[:, :2].astype(np.float64) * (width, height)
+    scale = hand_scale_px(image)
+    straightness: dict[str, float] = {}
+    for name, chain in FINGER_CHAINS.items():
+        straight, reach = _image_finger(image, chain, scale)
+        straightness[name] = straight
+        if finger_model == "hybrid":
+            states[name] = _hybrid_state(states[name], straight, reach)
     thumb_up = _up_alignment(image[L.THUMB_MCP], image[L.THUMB_TIP])
     fingers_up = _up_alignment(image[L.WRIST], image[L.MIDDLE_FINGER_MCP])
     others = np.delete(image[:, 1], L.THUMB_TIP)
@@ -239,16 +305,10 @@ def analyze_pose(obs: HandObservation, width: int, height: int) -> HandPose:
         thumb_tip_highest=thumb_tip_highest,
         label=PoseLabel.OTHER,
         heart=_heart_geometry(image),
+        straightness=straightness,
+        scale_px=scale,
     )
-    return HandPose(
-        flexion=flexion,
-        states=states,
-        thumb_up_alignment=thumb_up,
-        fingers_up_alignment=fingers_up,
-        thumb_tip_highest=thumb_tip_highest,
-        label=_label(pose),
-        heart=pose.heart,
-    )
+    return replace(pose, label=_label(pose))
 
 
 def _label(pose: HandPose) -> PoseLabel:
@@ -269,3 +329,44 @@ def _label(pose: HandPose) -> PoseLabel:
     if pose.curled(*four):
         return PoseLabel.FIST
     return PoseLabel.OTHER
+
+
+def heart_checklist(pose: HandPose) -> list[tuple[str, bool]]:
+    """The half-heart conditions in plain language, each with whether this pose meets it."""
+    g = pose.heart
+    low, high = HEART_INDEX_FLEXION
+    others_folded = not any(
+        pose.states[f] is FingerState.EXTENDED for f in ("middle", "ring", "pinky")
+    )
+    return [
+        ("hand upright", pose.fingers_up_alignment >= HEART_MIN_UPRIGHT),
+        ("index finger curved (not straight, not folded in)", low <= pose.flexion["index"] <= high),
+        (
+            "index tip reaching out from the hand",
+            g is not None and g.index_reach >= HEART_MIN_INDEX_REACH,
+        ),
+        ("index tip hooking downwards", g is not None and g.hook >= HEART_MIN_HOOK),
+        ("thumb stretched out", pose.states["thumb"] is not FingerState.CURLED),
+        ("thumb pointing down", g is not None and g.thumb_down_alignment >= HEART_MIN_THUMB_DOWN),
+        (
+            "thumb tip below the index tip",
+            g is not None and g.thumb_below_index >= HEART_MIN_THUMB_BELOW,
+        ),
+        (
+            "gap between thumb and index tip",
+            g is not None and HEART_GAP[0] <= g.gap <= HEART_GAP[1],
+        ),
+        ("thumb and index on the same side (heart opening)", g is not None and g.same_side),
+        ("other fingers folded", others_folded),
+    ]
+
+
+def stop_checklist(pose: HandPose) -> list[tuple[str, bool]]:
+    """The stop-pose conditions in plain language."""
+    return [
+        *(
+            (f"{name} finger stretched", pose.states[name] is FingerState.EXTENDED)
+            for name in ("index", "middle", "ring", "pinky")
+        ),
+        ("fingers pointing up", pose.fingers_up_alignment >= FINGERS_UP_MIN_ALIGNMENT),
+    ]

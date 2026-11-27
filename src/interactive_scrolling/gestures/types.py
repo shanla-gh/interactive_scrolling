@@ -128,6 +128,9 @@ class GestureEvent:
     peak_speed_palms_s: float | None = None
     duration_s: float = 0.0
     palm_magnitude_palms: float | None = None
+    decision_delay_s: float = 0.0
+    """Time between meeting every criterion and the confirmation (the recognizer's own
+    waiting, reported separately from the time the movement itself takes)."""
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
@@ -139,11 +142,44 @@ class GestureCandidate:
     elapsed_s: float
 
 
+class RejectCode:
+    """Stable machine-readable rejection codes (diagnostics, statistics, explanations)."""
+
+    TOO_SHORT = "too_short"
+    TOO_SLOW = "too_slow"
+    TOO_LONG = "too_long"
+    TOO_FAR = "too_far"
+    DIAGONAL = "diagonal"
+    POSE = "pose"
+    RETURN = "return"
+    COOLDOWN = "cooldown"
+    NOT_ARMED = "not_armed"
+    DISABLED = "disabled"
+    HAND_MOVING = "hand_moving"
+    RELEASED = "released"
+    TRACKING_LOST = "tracking_lost"
+    AMBIGUOUS = "ambiguous_hand"
+    HAND_CHANGED = "hand_changed"
+    BLOCKED = "blocked"
+    CANCELLED = "cancelled"
+
+
 @dataclass(frozen=True, slots=True)
 class GestureRejection:
+    """Why a gesture candidate was not confirmed.
+
+    ``code`` is a :class:`RejectCode`; ``measured``/``required`` (in ``unit``) quantify the
+    failed criterion where one applies, e.g. a swipe of 0.42 palm lengths where 0.80 are
+    required. ``details`` lists unmet pose conditions (half-heart, stop)."""
+
     gesture: GestureType
     reason: str
     timestamp_ns: int
+    code: str = ""
+    measured: float | None = None
+    required: float | None = None
+    unit: str = ""
+    details: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,3 +199,7 @@ class GestureFrame:
     """A candidate rejected in this frame, if any."""
     blocked_until_ns: int | None = None
     """End of the global cooldown after the last confirmed gesture, if still running."""
+    hint: str = ""
+    """A positioning hint from measured tracking quality (e.g. hand too far away)."""
+    hand_scale_px: float | None = None
+    """Hand size of the control hand in source pixels (``pose.hand_scale_px``)."""

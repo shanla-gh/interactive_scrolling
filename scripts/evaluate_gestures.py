@@ -16,6 +16,13 @@ mirrored right hand is geometrically a left hand, so this checks the either-hand
 real motion data (it is a simulation, not a recording of a left hand); horizontal expectations
 are swapped accordingly.
 
+``--synthetic-horizontal`` builds SEMI-SYNTHETIC horizontal index swipes from the recorded
+vertical pointing-hand swipes of session 2 (``point_down_x4``/``point_up_x4``): each frame keeps
+its real hand shape, jitter, tracking dropouts and velocity profile, only the hand's trajectory
+is rotated by 90 degrees (down -> the user's right, up -> the user's left). Every other frame
+is replayed unchanged, so negatives still count. It checks the horizontal path of the
+recognizer with real kinematics; it is not a recording of horizontal swipes.
+
 ``--any-pose`` is a diagnostic: the swipe recognizer accepts any hand pose, so the open-hand
 sweeps of version 0.2 can be used to check direction discrimination and return-movement
 handling on real horizontal motion. It is not a measurement of the index-swipe gesture.
@@ -37,6 +44,7 @@ import numpy as np
 
 from interactive_scrolling.config.settings import GestureSettings, SensitivityPreset
 from interactive_scrolling.gestures.engine import GestureEngine
+from interactive_scrolling.gestures.recognizers import V03_OPTIONS, RecognizerOptions
 from interactive_scrolling.gestures.types import GestureType
 from interactive_scrolling.motion.analyzer import MotionAnalyzer
 from interactive_scrolling.vision.landmarks import Handedness, HandObservation, TrackingResult
@@ -93,6 +101,14 @@ EXPECTATIONS: dict[str, Expectation] = {
     "neg_diagonal": Expectation("negative: diagonal pointing movements"),
     "neg_open_hold": Expectation("negative: open hand held", allowed=frozenset({G.STOP_GESTURE})),
 }
+SYNTHETIC_HORIZONTAL = {
+    "point_down_x4": ("synthetic_right_x4", G.INDEX_SWIPE_RIGHT),
+    "point_up_x4": ("synthetic_left_x4", G.INDEX_SWIPE_LEFT),
+}
+for _label, _gesture in SYNTHETIC_HORIZONTAL.values():
+    EXPECTATIONS[_label] = Expectation(
+        f"SYNTHETIC index swipe {_gesture.value.rsplit('_', 1)[1]} (rotated s2)", _gesture, 4
+    )
 NEGATIVE_PREFIX = "neg_"
 MIN_SEGMENT_FRAMES = 15
 """Shorter labeled runs are carry-over frames of the previous prompt."""
@@ -103,8 +119,20 @@ _MIRRORED = {
 }
 
 
-def expectation_for(label: str, mirrored: bool) -> Expectation | None:
-    if label in EXPECTATIONS:
+# With --any-pose the open-hand sweeps are real horizontal movements of a hand; their direction
+# and return handling can be scored (a proxy for horizontal swipes, not the index gesture).
+ANY_POSE_EXPECTATIONS: dict[str, Expectation] = {
+    "sweep_right_x3": Expectation(
+        "horizontal proxy right (sweeps, any pose)", G.INDEX_SWIPE_RIGHT, 3
+    ),
+    "sweep_left_x3": Expectation("horizontal proxy left (sweeps, any pose)", G.INDEX_SWIPE_LEFT, 3),
+}
+
+
+def expectation_for(label: str, mirrored: bool, any_pose: bool = False) -> Expectation | None:
+    if any_pose and label in ANY_POSE_EXPECTATIONS:
+        e = ANY_POSE_EXPECTATIONS[label]
+    elif label in EXPECTATIONS:
         e = EXPECTATIONS[label]
     elif label.startswith(NEGATIVE_PREFIX):
         e = Expectation(f"negative: {label[len(NEGATIVE_PREFIX) :].replace('_', ' ')}")
@@ -118,11 +146,47 @@ def expectation_for(label: str, mirrored: bool) -> Expectation | None:
         )
     if mirrored and e.category.startswith("index swipe ") and e.gesture is not None:
         e = replace(e, category=f"index swipe {e.gesture.value.rsplit('_', 1)[1]}")
+    if mirrored and e.category.startswith("horizontal proxy ") and e.gesture is not None:
+        side = e.gesture.value.rsplit("_", 1)[1]
+        e = replace(e, category=f"horizontal proxy {side} (sweeps, any pose)")
     return e
 
 
 def load(path: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))["frames"]
+
+
+def rotate_vertical_segments(frames: list[dict]) -> list[dict]:
+    """See ``--synthetic-horizontal``: translate each hand of the vertical pointing segments so
+    that its wrist trajectory is rotated by 90 degrees about the segment's first wrist position
+    (in pixels, so the hand's path keeps its length), leaving the hand's shape unchanged."""
+    out: list[dict] = []
+    origin: dict[tuple[int, str], tuple[float, float]] = {}
+    for frame in frames:
+        label = frame["label"]
+        if label not in SYNTHETIC_HORIZONTAL or not frame["hands"]:
+            out.append(
+                frame
+                if label not in SYNTHETIC_HORIZONTAL
+                else {**frame, "label": SYNTHETIC_HORIZONTAL[label][0]}
+            )
+            continue
+        w, h = frame["w"], frame["h"]
+        key = (frame["segment"], label)
+        hands = []
+        for hand in frame["hands"]:
+            lm = np.asarray(hand["lm"], dtype=np.float64)
+            wrist = (lm[0, 0] * w, lm[0, 1] * h)
+            ox, oy = origin.setdefault(key, wrist)
+            dx, dy = wrist[0] - ox, wrist[1] - oy
+            # (dx, dy) -> (-dy, dx): image down becomes image left = the user's right.
+            shift = ((-dy - dx) / w, (dx - dy) / h)
+            moved = lm.copy()
+            moved[:, 0] += shift[0]
+            moved[:, 1] += shift[1]
+            hands.append({**hand, "lm": moved.tolist()})
+        out.append({**frame, "label": SYNTHETIC_HORIZONTAL[label][0], "hands": hands})
+    return out
 
 
 _SWAP = {"left": "right", "right": "left"}
@@ -172,9 +236,10 @@ def evaluate(
     result: Result,
     name: str,
     verbose: bool,
+    options: RecognizerOptions | None = None,
 ) -> None:
     analyzer = MotionAnalyzer()
-    engine = GestureEngine(settings)
+    engine = GestureEngine(settings, options)
     if any_pose:
         engine.swipes.pose_ok = lambda pose: True
     segments: dict[tuple[int, str], list] = defaultdict(list)
@@ -193,7 +258,7 @@ def evaluate(
     for (index, label), events in sorted(segments.items()):
         if label == "transition" or sizes[(index, label)] < MIN_SEGMENT_FRAMES:
             continue
-        expectation = expectation_for(label, mirror)
+        expectation = expectation_for(label, mirror, any_pose)
         if expectation is None:
             continue
         got = Counter(e.gesture for e in events)
@@ -229,6 +294,7 @@ def evaluate(
                         "palm_palms": e.palm_magnitude_palms,
                         "peak_palms_s": e.peak_speed_palms_s,
                         "duration_s": e.duration_s,
+                        "decision_delay_s": e.decision_delay_s,
                         "hand": e.handedness.value,
                     }
                 )
@@ -273,6 +339,13 @@ def report(result: Result) -> dict:
             f"median {np.median(ratios):.2f} (min {min(ratios):.2f}, max {max(ratios):.2f}, "
             f"n={len(ratios)})"
         )
+        delays = [s["decision_delay_s"] for s in swipes]
+        durations = [s["duration_s"] for s in swipes]
+        print(
+            f"swipe confirmation: stroke start to confirmation median {np.median(durations):.3f} s"
+            f" (p95 {np.percentile(durations, 95):.3f}); recognizer waiting after all criteria "
+            f"were met median {np.median(delays):.3f} s (p95 {np.percentile(delays, 95):.3f})"
+        )
     return {
         "rows": out_rows,
         "returns_suppressed": result.returns_suppressed,
@@ -300,6 +373,21 @@ def main() -> int:
         "--mirror", action="store_true", help="replay flipped (simulated other hand)"
     )
     parser.add_argument("--any-pose", action="store_true", help="diagnostic: ignore the hand pose")
+    parser.add_argument(
+        "--synthetic-horizontal",
+        action="store_true",
+        help="replace the s2 vertical pointing swipes by rotated (semi-synthetic) horizontal ones",
+    )
+    parser.add_argument(
+        "--option",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="recognizer strategy (RecognizerOptions field), e.g. arming=still",
+    )
+    parser.add_argument(
+        "--v03", action="store_true", help="start from the version 0.3 strategies (V03_OPTIONS)"
+    )
     parser.add_argument("--json", type=Path, help="write the summary to this file")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
@@ -307,11 +395,38 @@ def main() -> int:
     for item in args.set:
         name, value = item.split("=", 1)
         settings = replace(settings, **{name: float(value)})
+    options = V03_OPTIONS if args.v03 else RecognizerOptions()
+    for item in args.option:
+        name, value = item.split("=", 1)
+        typed: object = value
+        if name == "dropout_s":
+            typed = float(value)
+        elif value in ("true", "false"):
+            typed = value == "true"
+        options = replace(options, **{name: typed})
     result = Result()
     for path in args.recordings:
-        evaluate(load(path), settings, args.mirror, args.any_pose, result, path.stem, args.verbose)
+        frames = load(path)
+        if args.synthetic_horizontal:
+            frames = rotate_vertical_segments(frames)
+        evaluate(
+            frames,
+            settings,
+            args.mirror,
+            args.any_pose,
+            result,
+            path.stem,
+            args.verbose,
+            options,
+        )
     summary = report(result)
-    summary["settings"] = {"preset": args.preset, "overrides": args.set, "mirror": args.mirror}
+    summary["settings"] = {
+        "preset": args.preset,
+        "overrides": args.set,
+        "mirror": args.mirror,
+        "synthetic_horizontal": args.synthetic_horizontal,
+        "options": {f: getattr(options, f) for f in options.__dataclass_fields__},
+    }
     if args.json:
         args.json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     failed = any(r["failing_segments"] for r in summary["rows"].values())
