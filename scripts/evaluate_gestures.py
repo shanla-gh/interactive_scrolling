@@ -122,6 +122,11 @@ EXPECTATIONS: dict[str, Expectation] = {
     "eval_half_heart_x4": Expectation("half-heart", G.HALF_HEART, 4),
     "eval_stop_x3": Expectation("stop pose", G.STOP_GESTURE, 3),
     "neg_point_and_drop": Expectation("negative: pointing hand dropped / relaxed"),
+    # session 5 (Brief 005): fist swipes (score with --set control_style=hybrid or fist)
+    "eval_fist_up_x4": Expectation("fist swipe up", G.INDEX_SWIPE_UP, 4),
+    "eval_fist_down_x4": Expectation("fist swipe down", G.INDEX_SWIPE_DOWN, 4),
+    "eval_fist_right_x4": Expectation("fist swipe right", G.INDEX_SWIPE_RIGHT, 4),
+    "eval_fist_left_x4": Expectation("fist swipe left", G.INDEX_SWIPE_LEFT, 4),
 }
 CALIBRATION_PREFIX = "calib_"
 """Calibration demonstrations are not scored (they are not independent of a calibrated

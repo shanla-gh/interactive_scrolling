@@ -7,6 +7,7 @@ Recordings are written to ``recordings/`` (ignored by Git) and are replayed by
 ``scripts/evaluate_gestures.py``.
 
 Usage:
+    python scripts/record_gestures.py --session 5 --hand right     (Brief 005, ~3 min)
     python scripts/record_gestures.py --session 4 --hand right     (Brief 004, ~5 min)
     python scripts/record_gestures.py --session 4 --hand left
     python scripts/record_gestures.py --session negatives --minutes 10   (ordinary use)
@@ -182,6 +183,39 @@ PROMPTS_4: list[tuple[str, float, str]] = [
 ]
 
 
+# Fifth session (Brief 005, ~3 minutes per hand): the open questions only - natural downward
+# finger swipes (also right after an upward one), fist swipes in four directions and the
+# fist-specific negatives. Evaluate fist segments with --set control_style=hybrid.
+PROMPTS_5: list[tuple[str, float, str]] = [
+    ("neg_rest", 3, "Sit normally. Hands relaxed."),
+    ("eval_down_x5", 14, "Move your finger DOWN the way you naturally would, 5 times."),
+    ("neg_rest", 3, "Relax."),
+    (
+        "eval_up_then_down",
+        12,
+        "UP (next video), let the hand come back, pause briefly, then DOWN (back). Twice.",
+    ),
+    ("neg_rest", 3, "Relax."),
+    ("calib_fist_up", 8, "CALIBRATION: make a FIST, hold it still, move it UP. 3 times."),
+    ("calib_fist_down", 8, "CALIBRATION: FIST, hold still, move it DOWN. 3 times."),
+    ("neg_rest", 3, "Relax. Now the test part begins."),
+    ("eval_fist_up_x4", 12, "FIST: hold it still, move it UP. 4 times."),
+    ("eval_fist_down_x4", 12, "FIST: hold it still, move it DOWN. 4 times."),
+    ("eval_fist_right_x4", 12, "FIST: hold it still, move it to YOUR RIGHT. 4 times."),
+    ("eval_fist_left_x4", 12, "FIST: hold it still, move it to YOUR LEFT. 4 times."),
+    ("neg_rest", 3, "Relax."),
+    ("neg_fist_still", 5, "Hold a FIST still. Do not move it."),
+    ("neg_open_close", 8, "Open and close your hand several times without moving it."),
+    ("neg_fist_reposition", 8, "With a closed hand, move it around casually (no swipes)."),
+    (
+        "neg_lower_out_of_view",
+        8,
+        "Raise a pointing hand, then lower it out of the picture. 3 times.",
+    ),
+    ("neg_natural", 10, "Move naturally: touch your face, reach for the mouse, talk."),
+]
+
+
 def negatives_session(minutes: float) -> list[tuple[str, float, str]]:
     """Ordinary computer use for the false-trigger measurement (no gestures at all)."""
     return [
@@ -198,7 +232,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--output-dir", type=Path, default=Path("recordings"))
-    parser.add_argument("--session", choices=["1", "2", "3", "4", "negatives"], default="4")
+    parser.add_argument("--session", choices=["1", "2", "3", "4", "5", "negatives"], default="5")
     parser.add_argument("--hand", choices=["right", "left", "either"], default="either")
     parser.add_argument("--minutes", type=float, default=10.0, help="negatives session length")
     args = parser.parse_args()
@@ -207,6 +241,7 @@ def main() -> int:
         "2": PROMPTS_2,
         "3": PROMPTS_3,
         "4": PROMPTS_4,
+        "5": PROMPTS_5,
         "negatives": negatives_session(args.minutes),
     }[args.session]
     disable_power_throttling()

@@ -34,6 +34,15 @@ STATUS_COLORS = {
 }
 
 
+BOUNDARY_HINTS = {
+    # The Director's 0.4 test: 7 of 13 downward swipes were refused here because the feed was
+    # back at its start - the gesture itself had been recognized.
+    "already at the first Short": " (gesture recognized; nothing before this Short)",
+    "already at the first tab": " (gesture recognized; this is the first tab)",
+    "already at the last tab": " (gesture recognized; this is the last tab)",
+}
+
+
 def outcome_banner(record: ActionRecord) -> tuple[str, str]:
     """(text, colour) of the overlay banner for a finished action."""
     action = record.action.label
@@ -41,8 +50,9 @@ def outcome_banner(record: ActionRecord) -> tuple[str, str]:
         detail = " (already liked)" if record.status is ActionStatus.NO_CHANGE else ""
         return f"\u2713 {action}{detail}", palette.ACCENT_GREEN
     reason = f": {record.reason}" if record.reason else ""
+    hint = BOUNDARY_HINTS.get(record.reason, "")
     color = palette.ACCENT_AMBER if record.status is ActionStatus.REJECTED else palette.ACCENT_RED
-    return f"\u2717 {action}{reason}", color
+    return f"\u2717 {action}{reason}{hint}", color
 
 
 def describe(record: ActionRecord) -> str:
