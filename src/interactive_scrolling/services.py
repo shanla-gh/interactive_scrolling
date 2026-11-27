@@ -17,6 +17,7 @@ import logging
 import platform
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
@@ -70,6 +71,18 @@ _ACTIVITY_KINDS = {
 
 log = logging.getLogger(__name__)
 
+MAX_STORED_REJECTIONS_PER_MIN = 60
+_NOT_STORED = frozenset({"tracking_lost", "hand_changed", "ambiguous_hand", "blocked", "cancelled"})
+
+
+def _worth_storing(rejection) -> bool:  # type: ignore[no-untyped-def]
+    """Rejections that tell something about a missed attempt (not tracking noise)."""
+    if rejection.code in _NOT_STORED:
+        return False
+    if rejection.code == "too_short" and rejection.measured is not None and rejection.required:
+        return rejection.measured >= 0.4 * rejection.required
+    return True
+
 
 @dataclass
 class ControlServices:
@@ -100,6 +113,7 @@ class ControlServices:
         self._eye_flushed = self.wall_clock()
         self.eye_report = None
         self.diagnostics = GestureDiagnostics()
+        self._stored_rejections: deque[float] = deque()
         self.recorder = LandmarkRecorder()
         self.calibration = CalibrationCollector()
         self.dispatcher.add_record_listener(self._diagnose_record)
@@ -110,6 +124,25 @@ class ControlServices:
         """Every processed frame (processing thread): diagnostics and the opt-in recorder."""
         self.diagnostics.observe(tracking, frame)
         self.recorder.observe(tracking)
+        rejection = frame.rejection
+        if rejection is not None and self.analytics is not None and _worth_storing(rejection):
+            now = time.monotonic()
+            window = self._stored_rejections
+            while window and now - window[0] > 60.0:
+                window.popleft()
+            if len(window) < MAX_STORED_REJECTIONS_PER_MIN:
+                window.append(now)
+                values = ""
+                if rejection.measured is not None and rejection.required is not None:
+                    values = f"{rejection.measured} of {rejection.required} {rejection.unit}"
+                if rejection.details:
+                    values += (" | " if values else "") + "; ".join(rejection.details)
+                self.analytics.record(
+                    EventKind.GESTURE_REJECTED,
+                    gesture=rejection.gesture.value,
+                    outcome=rejection.code or "other",
+                    reason=values or rejection.reason,
+                )
         if self.calibration.active:
             self.calibration.observe(tracking)
 
@@ -159,6 +192,11 @@ class ControlServices:
             "browser": browser,
             "performance": performance or {},
             "recognition": self.diagnostics.snapshot(),
+            "stored_rejections_7_days": self.analytics.rejection_summary(
+                self.wall_clock() - 7 * 86400
+            )
+            if self.analytics is not None
+            else {},
         }
 
     def export_diagnostics(self, folder: Path, performance: dict | None = None) -> Path:

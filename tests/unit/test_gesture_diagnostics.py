@@ -86,3 +86,25 @@ def test_export_contains_no_pairing_code_or_page_data(tmp_path: Path) -> None:
     assert services.user_settings.pairing_token not in text
     for forbidden in ("pairing", "video_id", "url", "title"):
         assert forbidden not in text.lower()
+
+
+def test_meaningful_rejections_are_stored_for_later_analysis(tmp_path: Path) -> None:
+    """Brief 005: the Director's statistics showed confirmed gestures only, so missed attempts
+    could not be analysed afterwards."""
+    from interactive_scrolling.actions.dispatcher import ActionDispatcher
+    from interactive_scrolling.services import ControlServices
+    from interactive_scrolling.storage.analytics import AnalyticsStore
+    from interactive_scrolling.storage.settings_store import UserSettings
+
+    analytics = AnalyticsStore(tmp_path / "analytics.sqlite3")
+    services = ControlServices(
+        engine=GestureEngine(),
+        dispatcher=ActionDispatcher(None),
+        user_settings=UserSettings(),
+        analytics=analytics,
+    )
+    replay(Hand(stroke((640, 300), (640, 365), 0.8, 0.2)), 2.0, services.gesture_tap)
+    analytics.close()
+    summary = AnalyticsStore(tmp_path / "analytics.sqlite3").rejection_summary(0)
+    assert summary.get("index_swipe_down: too_short") == 1
+    assert not any("tracking_lost" in key for key in summary)

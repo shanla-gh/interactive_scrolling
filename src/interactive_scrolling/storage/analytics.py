@@ -81,6 +81,9 @@ class EventKind(enum.Enum):
     SCROLL_ACTIVE_ENDED = "scroll_active_ended"
     SCROLL_HEARTBEAT = "scroll_heartbeat"
     """Written every 30 s of active scrolling, so a crash loses at most that much."""
+    GESTURE_REJECTED = "gesture_rejected"
+    """A gesture candidate that was not accepted: ``outcome`` = rejection code, ``reason`` =
+    measured / required values (Brief 005: missed attempts must be visible afterwards)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -485,6 +488,19 @@ class AnalyticsStore:
             return gestures, {a: n for a, n in rows}
 
         return self._read(query)  # type: ignore[return-value]
+
+    def rejection_summary(self, since_ts: float) -> dict[str, int]:
+        """Stored gesture rejections since ``since_ts``: "gesture: code" -> count."""
+        try:
+            with self._reader() as conn:
+                rows = conn.execute(
+                    "SELECT gesture, outcome, COUNT(*) FROM events WHERE kind = ? AND ts >= ? "
+                    "GROUP BY gesture, outcome ORDER BY COUNT(*) DESC",
+                    (EventKind.GESTURE_REJECTED.value, since_ts),
+                ).fetchall()
+        except (sqlite3.Error, OSError):
+            return {}
+        return {f"{g}: {code}": n for g, code, n in rows}
 
     def dispatched_count(self, day: date | None = None) -> int | None:
         day = day or datetime.fromtimestamp(self._clock()).date()
