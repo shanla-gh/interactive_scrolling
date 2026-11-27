@@ -57,7 +57,22 @@ that the active tab of its last focused window is a visible YouTube Shorts page 
 video. With several browsers, the one focused most recently is the single target; equal focus
 times are rejected as ambiguous. Each command carries the expected video id and the extension
 re-validates everything before acting. YouTube ignores navigation until the active video has
-loaded (observed on the live site), so loading Shorts are rejected as "still loading".
+loaded (observed on the live site), so loading Shorts are not sent commands.
+
+**Transient states (Brief 004, ADR-028).** Right after a navigation the page briefly reports no
+Short (the service worker drops the tab's state on the URL change and now asks the page to
+report again; the page also reports URL changes within 100 ms) and the new Short loads for a few
+hundred milliseconds. While a Shorts page was seen less than 1.5 s ago, "the Short is changing"
+and "the Short is still loading" are *transient*: the dispatcher waits for them, at most 1.2 s,
+in a single attempt (no retries). After a confirmed navigation the controller also knows the
+new Short's id and waits until the page reports it, so a quick second command never carries
+the previous id.
+
+**First Short (Brief 004).** At the first Short of a feed YouTube keeps the "previous" button in
+the layout but hides its host (`aria-hidden`, `visibility: hidden`, opacity 0) without
+disabling it; a click does nothing. Version 0.3 clicked it and reported failure after 3 s - all
+five failures of the Director's test. The page now reports `can_previous` / `can_next` and
+"previous" is refused at once ("already at the first Short", 11 ms on the live site).
 
 ## Tab navigation (Brief 003)
 
@@ -106,6 +121,9 @@ loaded (observed on the live site), so loading Shorts are rejected as "still loa
   One full pass recorded (next 312 ms, previous 211 ms, pause 4 ms, resume 5 ms, like refused as
   signed out); other runs were affected by the automated browser (startup tabs taking focus,
   a click ignored by the site) and are not evidence of correct behaviour either way.
+* Brief 004 live probe through the dispatcher (signed out, Shorts tab kept in front): previous
+  at the first Short refused in 11 ms; 8/8 consecutive "next" and 4/4 "previous" succeeded,
+  "next" taking about 1 s each because it waits for the new Short to load, "previous" 0.3-0.6 s.
 
 ## Known limitations
 

@@ -212,3 +212,78 @@ Each record states the decision, the alternatives considered and the trade-offs.
   code (would give the Guest full browser control).
 * **Trade-off**: traffic is readable on the local network; only authenticated, approved, shared
   actions can be executed.
+
+## ADR-023 Arm a new hand on one observed rest and follow blocked strokes (Brief 004)
+
+* **Decision**: a newly tracked hand may swipe after one frame at rest (instead of 0.2 s of
+  stillness); strokes before that or during a cooldown are followed and, when their start was
+  observed and they meet the motion criteria, remembered so that their return is suppressed.
+* **Why**: with the 0.2 s rule a hand in continuous motion armed only at the end of a stroke and
+  then confirmed the return: 0/12 recorded horizontal sweeps came out in the right direction
+  (now 9/12). A hand raised into view is still not a swipe (its stroke began before detection).
+* **Trade-off**: one more false swipe in the recorded negatives (a pointing hand moved while
+  holding the pose).
+
+## ADR-024 Pointing pose at the start or end of a stroke; flicks wait for the finger to recover
+
+* **Decision**: a stroke from a held pointing pose is accepted even if the finger curls during
+  it, but only once the finger recovers (pointing again or moving back) within 0.8 s; a stroke
+  that ends pointing is confirmed at once.
+* **Why**: downward finger flicks curl the index (the hand reads as a fist), so "pointing
+  throughout" rejected 3 of 4 recorded downward flicks; relaxing a pointing finger produces the
+  same fingertip movement, which an immediate confirmation turned into false downward swipes.
+* **Trade-off**: finger flicks are confirmed 0.3-0.56 s after the distance is reached; pointing
+  swipes keep zero waiting.
+
+## ADR-025 Early confirmation kept; stroke-end confirmation rejected
+
+* **Decision**: confirm as soon as all criteria are met.
+* **Alternatives**: wait for the end of the stroke and reject strokes that leave the picture or
+  travel too far (removed 2 of 4 false swipes, but added 0.30 s median waiting and broke long
+  horizontal strokes).
+* **Why**: responsiveness was a main complaint; the remaining false swipe (a pointing hand
+  dropped out of view) is documented.
+
+## ADR-026 Rule-based recognizer kept; learned stroke classifier not adopted
+
+* **Decision**: keep the deterministic recognizer with its temporal return handling.
+* **Evidence**: a 3-nearest-neighbour classifier trained on one recorded session found 0 of the
+  other session's intended strokes (different movement styles, 19 intended strokes in total);
+  isolated-stroke rules found 18/19 but with 23 false strokes that only the temporal return
+  logic removes. Revisit with many more labeled recordings.
+
+## ADR-027 Personal calibration that lowers but does not raise thresholds
+
+* **Decision**: Quick Calibration measures demonstrations with a stroke segmenter (wind-ups and
+  returns classified by timing) and sets the distance between the user's wind-ups and swipes,
+  lowering it for small movements but raising it only as far as the wind-ups require; it adds a
+  personal half-heart template and may widen the stop tilt. Values are bounded and reversible.
+* **Why**: on the recordings the working distance is set by the user's own movements (0.5-0.6:
+  wind-ups became swipes; 1.0: flicks missed). Calibrating on large swipes and raising the
+  distance made the other session's small flicks fail (0/8); with the rule both cross-session
+  simulations gave 8/8.
+
+## ADR-028 Transient browser states are waited for; the first Short is refused at once
+
+* **Decision**: the page reports whether a previous/next Short exists; the controller marks the
+  short "changing" and "loading" states after a navigation as transient and the dispatcher waits
+  for them (bounded, 1.2 s, one attempt).
+* **Why**: the Director's five failures were all "previous" at the first Short (YouTube hides
+  the button without disabling it; every attempt waited 3 s); quick repeated gestures were
+  refused because the page state was briefly missing after each navigation.
+
+## ADR-029 Finger up = next Short
+
+* **Decision**: default mapping finger up -> next Short, finger down -> previous; version 0.3
+  settings with the untouched old default are migrated once with a visible notice; customised
+  mappings are kept.
+* **Why**: the Director describes the interaction as on a touchscreen; in the real test twelve
+  upward swipes were sent as "previous".
+
+## ADR-030 Smoothing and finger-state model unchanged after measurement
+
+* **Decision**: keep the 40 ms position moving average and the 3D joint-angle finger states.
+* **Evidence**: One Euro filter equal to the current filter; 80 ms smoothing added 33 ms lag
+  and lost 4 fast flicks. Image-space finger states raised false open-palm frames while typing
+  from 0 to 116 and false pointing frames in natural movement from 25 to 76-79, without a stop
+  recall gain.

@@ -15,15 +15,15 @@ Hand gestures are the only control input. All gestures work with either hand.
 
 | Gesture | Default action |
 |---|---|
-| Index finger swipe down | Next YouTube Short |
-| Index finger swipe up | Previous YouTube Short |
+| Index finger moves up | Next YouTube Short (touchscreen direction, Brief 004) |
+| Index finger moves down | Previous YouTube Short |
 | Index finger swipe right (your right) | Next browser tab (to the right) |
 | Index finger swipe left (your left) | Previous browser tab (to the left) |
 | Single-hand half-heart, held | Like the current Short |
 | Open-palm stop pose, held | Pause / resume |
 
-The four swipes are one gesture family: a pointing hand (index finger extended, other fingers
-folded) moving in one direction. Tab navigation stays inside the active window of the
+The four swipes are one gesture family: the index fingertip of a pointing hand moving in one
+direction - a finger flick, a wrist turn or a small hand movement. Tab navigation stays inside the active window of the
 supported browser; it never switches other Windows applications. Shorts actions (next,
 previous, like, pause) stay restricted to a valid Shorts tab.
 
@@ -45,8 +45,14 @@ Eye and face tracking never control anything.
 | **M9** Doomscroll Wrapped | Daily and session summary, 1080x1920 PNG export | Brief 003 |
 | **M10** Minimal Co-op Doomscroll | Two-person host/guest gesture control of one Shorts feed over a private LAN session | Brief 003 |
 | **M11** Packaging & Release Candidate | Windows distribution, setup guide, clean-environment validation | Brief 003 |
+| **Beta stabilization** (Brief 004) | Root-cause analysis of the Director's test, gesture engine rework, diagnostics, Practice and Quick Calibration, browser reliability, benchmark and Audit 006 | Implemented; Director beta validation pending |
 
-Integration audits follow M4 (003), M6 (004) and M10 (005). Status of each checkpoint is
+Integration audits follow M4 (003), M6 (004), M10 (005) and the beta stabilization (006).
+
+**Next (needs the Director):** beta validation (`docs/milestones/BRIEF_004_VALIDATION.md`) and
+the session-4 recordings with each hand; then tuning of left/right swipes, the half-heart and
+the stop pose on real data, and the 30-minute false-trigger measurement. No new features until
+the core interaction is accepted. Status of each checkpoint is
 tracked in [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
 ## Feature definitions (Brief 003)

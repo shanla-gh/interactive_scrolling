@@ -4,6 +4,52 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0b1] - beta (not released; Director validation pending)
+
+Engineering Brief 004: beta stabilization of gesture recognition and browser reliability,
+driven by the Director's real-world test. Evidence: `docs/benchmarks/GESTURE_BENCHMARK_004.md`.
+
+### Fixed
+
+- "Previous Short" at the first Short of a feed clicked a button YouTube hides without
+  disabling it and failed after 3 s (all five failures of the Director's test); it is now
+  refused at once ("already at the first Short").
+- A gesture right after a navigation was refused with "no YouTube Shorts tab is active" or
+  "the active Short changed" while the page switched Shorts; the page state is now re-reported
+  at once and the dispatcher waits briefly (at most 1.2 s, one attempt) for a changing or
+  loading Short. The Shorts session no longer ends and restarts around every navigation.
+- Horizontal movements came out in the opposite direction: a newly tracked hand had to be
+  still for 0.2 s, so in continuous motion the recognizer armed at the end of a stroke and
+  confirmed the return (recorded sweeps 0/12 -> 9/12).
+- Downward finger flicks were rejected because the curling finger reads as a fist (1/4 -> 4/4
+  on the recordings); relaxing a pointing finger is still not a swipe.
+- The stop pose's stillness check failed on small, jittering hands far from the camera.
+- The evaluator's mirrored replay did not swap handedness labels.
+
+### Changed
+
+- Moving the finger up now shows the next Short (down: previous). Settings with the old
+  default are migrated once with a notice; customised mappings are kept.
+- Half-heart: the other fingers may curve with the index; hold 0.6 -> 0.5 s.
+- Under a named preset the thresholds follow the current preset values; presets are shown as
+  Relaxed / Balanced / Precise, plus Personal (calibration) and Custom.
+- A gesture made while the previous action is still running waits for it (one at most,
+  expires after 2.5 s) instead of being refused.
+- Extension 0.4.0 (no new permissions).
+
+### Added
+
+- Structured rejection reasons with measured and required values, plain-language
+  explanations, live recognizer state, positioning and low-frame-rate hints, and the final
+  browser result on the video.
+- Gesture Practice and Quick Calibration (personal swipe distances, half-heart template, stop
+  tilt; bounded, reversible, derived numbers only).
+- "Copy diagnostics": recognition and browser decisions without personal data; optional
+  landmark-only recording of a practice session.
+- Recorder session 4 (Brief 004, per hand) and an ordinary-use negatives session; evaluator
+  strategy switches, semi-synthetic horizontal swipes, calibration simulation, classifier and
+  filtering experiments.
+
 ## [0.3.0rc1] - release candidate (not released; Director acceptance pending)
 
 ### Added

@@ -2,12 +2,14 @@
 
 Rule-based recognition on top of hand tracking (`vision/`) and motion analysis (`motion/`).
 Code: `src/interactive_scrolling/gestures/`. No confidence percentages are produced: every
-decision follows the documented criteria below, and the UI shows candidate *progress*
-(fraction of the required distance or hold time) instead.
+decision follows the documented criteria below, and the UI shows candidate *progress* and,
+for every rejection, the measured and the required value.
 
-Version 0.3 (Engineering Brief 003) replaced the vertical-only finger swipe and the open-hand
-sweep with one four-direction index-finger gesture family, and the thumbs-up with the
-single-hand half-heart.
+Version 0.3 (Brief 003) introduced one four-direction index-finger gesture family and the
+single-hand half-heart. Version 0.4 (Brief 004) reworked the recognizer after the Director's
+real-world test; the measurements behind every decision are in
+[GESTURE_BENCHMARK_004.md](../benchmarks/GESTURE_BENCHMARK_004.md). User-facing guides:
+[gestures](../guides/GESTURE_GUIDE.md), [calibration](../guides/CALIBRATION_GUIDE.md).
 
 ## Pipeline
 
@@ -15,211 +17,165 @@ single-hand half-heart.
 TrackingResult + MotionFrame (processing thread)
   -> GestureEngine.update()
        control-hand selection (AUTO / LEFT / RIGHT, ambiguity suspension)
-       pose analysis (pose.py)
+       pose analysis (pose.py), hand scale, positioning hints, frame rate
        DirectionalSwipeRecognizer (4 directions), half-heart and stop recognizers
        conflict rules (global cooldown, static vs dynamic)
-  -> GestureFrame (UI)            -> GestureEvent (confirmed)
-                                       -> ActionDispatcher (actions/) -> controller
+  -> GestureFrame (UI, diagnostics tap)   -> GestureEvent (confirmed)
+                                               -> ActionDispatcher (actions/) -> controller
 ```
 
 The engine never performs actions. Events go to the dispatcher, which checks the control mode,
-the mapping, the event age and the controller context before anything is executed.
+the mapping, the event age and the controller context before anything is executed. Every
+processed frame also goes to the in-memory diagnostics collector (`gestures/diagnostics.py`)
+through a pipeline gesture tap.
 
 ## Coordinates and directions
 
-* Positions: source pixels of the unmirrored camera frame; distances and speeds in **palm
-  lengths** (wrist to middle-finger knuckle), so thresholds do not depend on the distance to
-  the camera. During a stroke the largest palm length seen is used.
+* Positions: source pixels of the unmirrored camera frame. Distances and speeds are in **hand
+  lengths** ("palm lengths"): the larger of the wrist-to-middle-knuckle distance and the
+  knuckle width / 0.8 (`pose.hand_scale_px`), which stays stable when the wrist turns (the
+  palm length alone varied 27-184 px within one recorded sweep). The swipe recognizer smooths
+  this scale while the hand rests and freezes it during a stroke.
 * *Down* / *up* follow the image. *Right* and *left* are the **user's own** right and left: the
   camera image is not mirrored, so a movement to the user's right moves towards the image's
-  left. The preview mirror setting never influences recognition (inference always runs on the
-  unmirrored frame); it only changes how the image is drawn.
-* Either hand works: nothing in the rules depends on handedness. The control-hand preference
-  (AUTO, LEFT, RIGHT) only decides *which* hand may issue gestures.
+  left. Preview mirroring is display-only.
+* Physical direction and content are kept apart: by default moving the finger **up** shows the
+  **next** Short (touchscreen direction, the Director's natural mapping); settings of version
+  0.3 that still had "down = next" are migrated once with a notice (`settings_store`).
+* Either hand works: nothing in the rules depends on handedness.
 
 ## Gestures
 
 | Gesture | How to perform it | Default action |
 |---|---|---|
-| `INDEX_SWIPE_DOWN` | Point with the index finger (other fingers folded), move down quickly | Next Short |
-| `INDEX_SWIPE_UP` | The same, upwards | Previous Short |
+| `INDEX_SWIPE_UP` | Pointing finger moves up (finger flick, wrist or hand) | Next Short |
+| `INDEX_SWIPE_DOWN` | The same, downwards | Previous Short |
 | `INDEX_SWIPE_RIGHT` | The same, to your right | Next browser tab |
 | `INDEX_SWIPE_LEFT` | The same, to your left | Previous browser tab |
-| `HALF_HEART` | One half of a two-handed heart with one hand, held still ~0.6 s | Like Short |
+| `HALF_HEART` | One half of a two-handed heart, held still 0.5 s | Like Short |
 | `STOP_GESTURE` | Open hand, fingers up, palm to the camera, held still 0.8 s | Pause / resume |
 
-### Index swipes (one recognizer, four directions)
+### Index swipes
 
-Criteria at the balanced preset (all four directions share them):
+Criteria at the Balanced preset (all directions; left/right may have their own distance):
 
-* pointing pose (index extended, middle/ring/little finger curled) at the start of the stroke
-  and in >= 60 % of its frames;
-* the **index fingertip** travels >= 0.8 palm lengths along the direction, measured from where
-  it last rested, with a peak speed >= 2.0 palm lengths/s, within 0.7 s;
-* the movement along the direction is >= 1.8 times the movement across it (within ~29 degrees
-  of the axis). Movements between the axes are **rejected**, never assigned to the nearer
-  direction; the direction is committed when the stroke starts (dominant axis of the
-  fingertip velocity) and a reversal restarts the opposite stroke from the turning point.
+* the **index fingertip** travels >= 0.8 hand lengths along the direction, measured from where
+  it last rested, with a peak speed >= 2.0 hand lengths/s, within 0.7 s;
+* the movement along the direction is >= 1.8 times the movement across it (within ~29 degrees);
+  diagonals are rejected, never assigned to the nearer direction;
+* confirmation is **early**: as soon as the distance is reached (the user does not have to
+  finish an exaggerated movement). Waiting for the end of the stroke was measured
+  (+0.30 s median) and rejected.
 
-**Why the fingertip of a pointing hand.** The brief asked to compare (1) small index-finger-led
-movements with little palm displacement and (2) moving the pointing hand. The fingertip
-measurement supports both, as long as the index stays extended: a wrist-pivot moves the
-fingertip with little palm movement, a whole-hand stroke moves both. What it does not support
-is the *flick* (curling and extending the finger), because the pose requirement rejects it.
-Evidence (replayed recordings, balanced preset):
+**Hand pose (`pose_rule="endpoints"`).**
 
-| Style | Recording | Recall | False triggers |
-|---|---|---|---|
-| Finger-led swipes, finger partly curling (session 1) | down 4, up 4 | 1/4 down, 4/4 up | 1 wrong-direction swipe |
-| Pointing hand moving (session 2) | down 4, up 4 | 4/4, 4/4 | 0 |
+* A stroke made with a pointing hand is confirmed at once: the hand must be pointing when the
+  distance is reached, and either during at least half of the stroke or just before it
+  started.
+* "Just before" means pointing that was sustained, not a single stray frame: at least 60 % of
+  the frames of the preceding 0.25 s, spanning at least 0.06 s, measured in time so it does
+  not depend on the frame rate.
+* A **downward finger flick** curls the index finger, so the hand reads as a fist during the
+  stroke; requiring pointing throughout rejected almost all downward flicks (1/4).
+* A stroke that started from held pointing but has the finger curled at the threshold is
+  therefore a **pending flick**. It is confirmed when the finger recovers within 0.8 s
+  (pointing again, or the fingertip moving back 0.25 hand lengths). It is rejected if the
+  finger stays curled, because relaxing a pointing finger into a fist moves the fingertip
+  the same way.
+* An open hand or a fist moving is never a swipe.
 
-In the confirmed swipes the palm moved a median 0.74 of the fingertip distance (range
-0.04-1.04, n = 14): the Director's natural swipes were mostly whole-hand movements, with some
-wrist-led ones. Flicks remain ambiguous with their own return (ADR-013), so the selected
-interaction is **a pointing hand moving in the direction**, which may be a small wrist movement
-as long as the fingertip travels about one palm length. Without the pose requirement the same
-data produced 17 events in the open-hand sweep segments (all in the wrong direction, see below) and false triggers in natural
-movement, typing and two-hand segments (`--any-pose` diagnostic), so the pose requirement is
-what keeps the gesture safe.
+**Arming (`arming="observe"`).** A newly tracked hand (after 0.3 s of stable tracking) can
+swipe once the recognizer has seen it at rest for one frame. Strokes before that, or during the
+0.5 s cooldown after a gesture, are followed; if they meet the motion criteria (and their start
+was observed) they are remembered like a swipe so their return is suppressed too. Version 0.3
+required 0.2 s of stillness instead: during continuous movement it armed only at the end of a
+stroke and then confirmed the return - every recorded horizontal sweep came out in the opposite
+direction (0/12; now 9/12).
 
-**One shared threshold set.** Horizontal and vertical thresholds are shared. Palm-length units
-are isotropic and the existing data contains no horizontal index swipes that would justify
-separate values; the presets and the distance/speed settings apply to all four directions. The
-third recording session (`scripts/record_gestures.py --session 3`) collects the data needed to
-revisit this.
+**Return movements.** After a swipe every opposite stroke is its return until the fingertip
+is back within 35 % of the swipe length of where the swipe started *and has paused there*
+(below 0.5 hand lengths/s for 0.1 s), or 1.2 s after the swipe's movement ended. A stroke at
+right angles is never a return. Ending the return phase after a pause *anywhere* was measured
+and rejected (natural pauses between stroke and return are 0.2-0.37 s).
 
-### Return movements
-
-After a swipe the hand moves back, about as fast and as far as the swipe, and in the recordings
-often in several parts that overshoot the starting point. Lifecycle:
-`REARMING -> IDLE -> CANDIDATE -> CONFIRMED -> COOLDOWN (0.5 s) -> REARMING -> IDLE`, plus a
-*return phase* after each confirmed swipe:
-
-* every stroke opposite to the last swipe is treated as its return while the return phase lasts;
-* the phase ends when the fingertip is back within 35 % of the swipe length of where the swipe
-  started **and has paused there** (below 0.5 palm lengths/s for 0.1 s), or when 1.2 s have
-  passed since the swipe's movement ended;
-* a stroke at right angles (for example a tab swipe after a Shorts swipe) is never a return.
-
-So "next, then previous" needs only the return and a brief pause, not a long fixed delay, while
-a return that flows on past the start cannot trigger the opposite action. A position-only rule
-(without the pause) failed on the recordings at the HIGH preset: the third part of a return
-started near the start and became a false SWIPE UP (regression test
-`tests/regression/test_gesture_return_overshoot_triggers_opposite.py`).
-
-A newly acquired hand must be tracked for 0.3 s and be nearly still for 0.2 s before its first
-swipe, so raising a hand into view cannot trigger a swipe. Losing the hand cancels the stroke.
+**Tracking dropouts.** Gaps of up to 0.2 s (fast movements blur) keep the current candidate.
 
 ### Half-heart
 
-One half of the familiar two-handed heart, made with one upright hand: the index finger curves
-up and over towards the heart's centre line with its tip hooking down, the thumb points down
-towards the heart's bottom point, the tips stay apart. Image-space rules (palm lengths):
+One half of the two-handed heart with one upright hand: index finger curved over with its tip
+hooking down, thumb pointing down below it, tips apart. Image-space rules (hand lengths):
 
 | Criterion | Value | Separates it from |
 |---|---|---|
 | Index flexion (sum of 3 joints) | 80-230 degrees | pointing (straight), fist (folded) |
-| Index tip to its knuckle | >= 0.5 | fist (tip tucked into the palm) |
-| Index tip below its highest joint | >= 0.12 | relaxed and C-shaped hands (tips point sideways) |
+| Index tip to its knuckle | >= 0.5 | fist |
+| Index tip below its highest joint | >= 0.12 | relaxed and C-shaped hands |
 | Thumb not curled, pointing down | within 70 degrees of down | thumbs up |
 | Thumb tip below index tip | >= 0.25 | relaxed hand hanging down |
-| Tip gap | 0.3-2.2 | pinch (tips touching) |
+| Tip gap | 0.3-2.2 | pinch |
 | Tips on the same side of the hand axis | yes | |
-| Middle, ring, little finger | not extended | open hand |
+| Middle, ring, little finger | not straight (< 35 degrees flexion) | open hand |
 | Hand axis upright | within 65 degrees of up | sideways C, thumbs down |
 
-Then held still (palm <= 0.6 palm lengths/s) for 0.6 s; one event per hold; the pose must be
-released for 0.25 s before it can trigger again. This is *not* the crossed-finger mini-heart and
-not a pinch. **Verification status**: the thresholds are an engineering starting point checked
-on synthetic hands (both hands, three sizes) and on all existing negative recordings (no false
-half-hearts in 190 s of rest, natural movement, typing, face touching, two hands, thumbs up,
-fist, pointing, open hand). No recording of a real half-heart exists yet; the Director's
-session-3 recording is required before its recall can be stated.
+The other fingers may curve with the index (version 0.4, `HEART_RULE="tolerant"`; version 0.3
+required them folded): no additional half-heart frames in 5,579 recorded hand frames. Held
+still for **0.5 s** (0.6 s before; no false half-heart at 0.3-0.6 s in the recordings), one
+event per hold, release 0.25 s before the next. A **personal template** from Quick Calibration
+(`pose.matches_personal_heart`) additionally accepts poses close to the user's own shape;
+gap, thumb-below-tip, curved index and thumb not curled stay mandatory. No real half-heart
+recording exists yet.
 
 ### Stop pose
 
-Unchanged from 0.2: all four fingers extended, hand axis within 40 degrees of vertical, still,
-held 0.8 s. Pose classification uses the summed flexion of each finger's joints: extended <= 70
-degrees, curled >= 140 (thumb <= 45 / >= 80), uncertain in between.
+All four fingers extended (3D joint angles), hand axis within 40 degrees of vertical
+(calibration may widen it up to 70), still, held 0.8 s. Stillness is the net palm drift over
+0.3 s (<= 0.25 hand lengths), not the instantaneous speed: at arm's length a hand is ~42 px
+and landmark jitter alone read as ~1 hand length per second. In the recordings the open palm
+at arm's length stayed visible for only ~0.5 s before MediaPipe lost it (and in one prompt it
+was never detected); this is a camera/detector limit, answered with a "move closer" hint.
+Image-space finger extension and shorter holds were measured and rejected (more false poses,
+no recall gain).
 
 ## Conflict rules
 
 * After any confirmed gesture, every other recognizer is blocked for 0.4 s.
 * Static candidates (half-heart, stop) are cancelled while a swipe candidate is active.
 * At most one event per frame.
-* A disabled swipe direction is still followed (and its return suppressed) but never confirms,
-  so a movement in a disabled direction cannot be misread as another direction.
+* A disabled swipe direction is still followed (and its return suppressed) but never confirms.
 
 ## Control hand
 
-* AUTO (default): the first hand alone in view becomes the control hand and keeps the role while
-  tracked. If several hands could take the role, recognition is suspended.
-* LEFT / RIGHT: only a hand whose handedness (majority over the last 15 frames, ignoring labels
-  with score < 0.7) matches.
-* Two hands closer than 1.2 palm lengths suspend recognition (identity may swap).
+* AUTO (default): the first hand alone in view becomes the control hand and keeps the role
+  while tracked; with several possible control hands recognition is suspended.
+* LEFT / RIGHT: only a hand whose smoothed handedness matches.
+* Two hands closer than 1.2 hand lengths suspend recognition.
+
+## Diagnostics and feedback
+
+* Every rejection has a code (`RejectCode`) and, where it applies, measured/required values and
+  the unmet pose conditions; `gestures/explain.py` turns them into one plain sentence.
+* Frames carry positioning hints (hand smaller than 4.5 % of the image width, hand at the image
+  edge, camera below 20 fps) and the hand scale.
+* `GestureDiagnostics` counts per gesture: candidates formed, confirmed, rejected by code, and
+  the browser outcome of each action; "Copy diagnostics" exports it without personal data.
 
 ## Settings
 
-Presets scale distance, speed and hold times: LOW 1.25x, BALANCED 1.0x, HIGH 0.8x. Editable:
-swipe distance and speed, half-heart and stop hold, swipe cooldown, return window, control hand,
-per-gesture enable, gesture-to-action mapping (any gesture to any available action or none).
-Settings files of version 0.2 are migrated on first load and backed up
-(`settings.json.v1-backup`).
-
-## Benchmark (CP 4.5)
-
-`scripts/evaluate_gestures.py recordings/*.json [--preset ...] [--mirror]` on the two Director
-recordings (one person, one camera, Nov 2026). Sample sizes are small: these are engineering
-checks, not accuracy claims.
-
-| Category | n | Balanced | Low | High | Mirrored (balanced) |
-|---|---|---|---|---|---|
-| Index swipe down (pointing hand) | 4 | 4/4 | 4/4 | 4/4 | 4/4 |
-| Index swipe up (pointing hand) | 4 | 4/4 | 4/4 | 4/4 | 4/4 |
-| Finger-led swipes (session 1) | 8 | 5/8, 1 false | 1/8 | 5/8, 2 false | 5/8, 1 false |
-| Index swipe left / right | 0 | no recordings | | | |
-| Half-heart | 0 | no recordings | | | |
-| Stop pose | 3 | 0/3 in the prompt window | 0/3 | 0/3 | 0/3 |
-| Return movements suppressed | | 13 | 12 | 21 | 13 |
-| False triggers, 190 s of negatives (24 segments) | | 0 | 0 | 0 | 0 |
-
-Negative segments: rest, natural movement, typing, face touching, two hands, open hand held,
-fist, pointing held, thumbs up (the old like) and open-hand sweeps (the old horizontal gesture).
-
-* **Mirrored replay** flips the recordings and swaps the handedness labels; a mirrored right hand
-  is geometrically a left hand, so this is a simulation of left-hand use on real motion, not a
-  left-hand recording. Results are identical.
-* **Stop pose**: in two of the three prompts MediaPipe lost the open hand at arm's length for
-  most of the prompt or measured the fingers as half-bent; when the open palm was tracked and
-  held, the stop confirmed, but only after the prompt window ended. The 0.2 recognizer scored
-  the same 0/3; this is a tracking limitation for open palms far from the camera, recorded for
-  the Director checklist.
-* **The 4/12 open-hand sweeps of version 0.2**: their rejection reasons were mostly direction
-  reversals, strokes too short and the open pose not being held during fast movement. The
-  replacement cannot be scored on those recordings: they are open-hand movements and are now
-  correctly ignored (0 events). The pose-independent diagnostic (`--any-pose`) on the same 12
-  sweeps produced **0 correct and 17 opposite-direction events**. The traces show why: before
-  each sweep the Director moved the hand to a starting position with a stroke of about 6 palm
-  lengths/s in the opposite direction, the real sweep followed at 16-19 palm lengths/s, and the
-  first stroke from rest was taken as the gesture, with the real sweep then suppressed as its
-  return. This is the same back-and-forth ambiguity that rules out flicks (ADR-013).
-  Consequences: (1) the pointing-pose requirement is what prevents it (a preparation movement
-  made while the hand is still opening or turning is not a pointing stroke); (2) a user who
-  pre-positions the hand **while already pointing** would trigger the opposite tab switch,
-  which no recording can rule out yet. A minimum resting time before a stroke ("arming dwell",
-  tried at 0.1-0.3 s) did not resolve the inversion (at best 3 correct / 10 wrong) and lost real
-  upward swipes (4/4 -> 3/4 at 0.1 s, 1/4 at 0.2 s), so it was not adopted. Speed does not
-  separate gesture from return either: after the vertical swipes, returns were as fast as or
-  faster than the swipes. Left/right swipes therefore remain **verification pending** until
-  the session-3 recording and the Director checklist (four repeated right swipes must give four
-  next-tab actions and no previous-tab action).
+Presets (shown as Relaxed / Balanced / Precise) scale distance, speed and hold times (0.8x /
+1.0x / 1.25x); under a named preset thresholds always follow the current preset values, so
+improved defaults reach existing users. *Personal* holds the Quick Calibration result, *Custom*
+hand-edited values. Editable in Developer Mode: swipe distance (up/down and left/right), speed,
+holds, cooldown, return window, control hand, per-gesture enable and the mapping.
+The recognition strategies themselves are `RecognizerOptions` (`V03_OPTIONS` reproduces
+version 0.3 for the benchmark).
 
 ## Known limitations
 
-* Left/right swipes and the half-heart have no real recordings yet (synthetic tests only).
-* Back-and-forth ambiguity: a fast preparation movement made while already pointing, in the
-  direction opposite to the intended swipe, is recognized as a swipe (see the benchmark).
-* All calibration data comes from one person, one camera and one room.
-* Holding an open hand still for 0.8 s is a stop gesture.
-* An opposite swipe directly after a return needs a brief pause (about 0.1-0.2 s) at the start.
-* The stop pose is unreliable when the open hand is far from the camera (tracking).
+* Left/right swipes, the half-heart and the stop pose at a normal distance have no real
+  recordings yet; their evidence is synthetic or a proxy (benchmark report).
+* All recordings come from one person, one camera and one room; there is no independent
+  held-out set, so all numbers are development results.
+* A pointing hand dropped out of view can be read as a downward swipe (one recorded case).
+* Finger flicks need about 30 fps; at 15 fps they are undersampled (hand movements still work).
+* An opposite swipe right after a swipe needs the hand back near the start with a brief pause.
+* The stop pose is unreliable with the open hand far from the camera (detection).
