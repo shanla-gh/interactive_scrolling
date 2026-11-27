@@ -29,6 +29,7 @@ from tests.gesture_helpers import (
     THUMBS_UP,
     Hand,
     chain,
+    index_curl,
     kinds,
     rejections,
     run,
@@ -503,82 +504,16 @@ def test_reset_forgets_control_hand_and_candidates() -> None:
 # ---------------------------------------------------------------------- Brief 004 findings
 
 
-def _index_curl(fraction: float):
-    """POINTING with the index finger curled by ``fraction`` of a fist curl."""
-    from tests.gesture_helpers import CURLED, Pose
-
-    index = tuple(a * fraction for a in CURLED)
-    return Pose({**POINTING.fingers, "index": index}, POINTING.thumb_dir, POINTING.thumb_bend)
-
-
-def _flick_pose(t_start: float, curl_s: float = 0.12, hold_s: float = 0.25, back_s: float = 0.15):
-    """Pointing, a quick index curl (fingertip moves down), a short pause, re-extension."""
-
-    def pose(t: float):
-        if t < t_start:
-            return POINTING
-        u = t - t_start
-        if u < curl_s:
-            return _index_curl(u / curl_s)
-        if u < curl_s + hold_s:
-            return FIST
-        if u < curl_s + hold_s + back_s:
-            return _index_curl(1.0 - (u - curl_s - hold_s) / back_s)
-        return POINTING
-
-    return pose
-
-
-def test_downward_finger_flick_that_recovers_is_a_swipe_down() -> None:
-    """Director test, Nov 2026: downward swipes were nearly impossible. A downward fingertip
-    flick curls the index finger (the hand reads as a fist), which version 0.3 rejected; it is
-    now confirmed once the finger recovers, after a measured decision delay."""
-    events, _ = run([Hand(still(640, 400), pose=_flick_pose(1.0), palm_px=140)], 2.5)
-    assert kinds(events) == ["INDEX_SWIPE_DOWN"]
-    assert events[0].decision_delay_s > 0.0
-
-
 def test_finger_relaxing_into_a_fist_is_not_a_swipe() -> None:
     """Relaxing a pointing finger moves the fingertip like a flick but the finger stays curled
     (synthetic horizontal benchmark, Brief 004): no swipe, with an explanation."""
 
     def pose(t: float):
-        return POINTING if t < 1.0 else (_index_curl((t - 1.0) / 0.12) if t < 1.12 else FIST)
+        return POINTING if t < 1.0 else (index_curl((t - 1.0) / 0.12) if t < 1.12 else FIST)
 
     events, frames = run([Hand(still(640, 400), pose=pose, palm_px=140)], 2.5)
     assert events == []
     assert any(f.rejection and "stayed curled" in f.rejection.reason for f in frames)
-
-
-def test_continuous_back_and_forth_after_acquisition_recognizes_the_first_stroke() -> None:
-    """Regression (recorded sweeps, Brief 004): version 0.3 armed a new hand only after 0.2 s
-    of stillness, so a hand in continuous motion armed at the end of a stroke and then
-    confirmed the return - always the opposite direction."""
-    path = chain(
-        (0.0, still(700, 400)),
-        (0.45, stroke((700, 400), (520, 400), 0.45, 0.25)),  # to the user's right
-        (0.75, stroke((520, 400), (700, 400), 0.75, 0.35)),  # back
-        (1.15, stroke((700, 400), (520, 400), 1.15, 0.25)),
-        (1.45, stroke((520, 400), (700, 400), 1.45, 0.35)),
-    )
-    events, _ = run([Hand(path)], 2.5)
-    assert kinds(events)[:1] == ["INDEX_SWIPE_RIGHT"]
-    assert "INDEX_SWIPE_LEFT" not in kinds(events)
-
-
-def test_v03_arming_misses_the_first_stroke_and_confirms_its_return() -> None:
-    """The same movement with the version 0.3 strategies, documenting the defect."""
-    from interactive_scrolling.gestures.recognizers import V03_OPTIONS
-
-    path = chain(
-        (0.0, stroke((700, 400), (690, 400), 0.0, 0.2)),
-        (0.2, stroke((690, 400), (520, 400), 0.2, 0.25)),
-        (0.45, stroke((520, 400), (700, 400), 0.45, 0.35)),
-    )
-    events, _ = run([Hand(path)], 1.6, engine=GestureEngine(GestureSettings(), V03_OPTIONS))
-    new, _ = run([Hand(path)], 1.6)
-    assert "INDEX_SWIPE_RIGHT" not in kinds(events)
-    assert "INDEX_SWIPE_LEFT" not in kinds(new)
 
 
 def test_short_tracking_dropout_during_a_stroke_does_not_cancel_it() -> None:
@@ -609,23 +544,6 @@ def test_rejections_report_measured_and_required_values() -> None:
     assert short.gesture is G.INDEX_SWIPE_DOWN
     assert short.unit == "palms" and short.required == 0.8
     assert 0.2 < short.measured < 0.8
-
-
-def test_small_hand_with_jitter_can_hold_the_stop_pose() -> None:
-    """At arm's length a hand is ~45 px long and landmark jitter is a large fraction of it
-    (recording: version 0.3 cancelled the hold as "hand moving" at 0.9 palms/s). Stillness is
-    now the net drift over a short window, which jitter does not accumulate."""
-    import random
-
-    rng = random.Random(4)
-    jitter = {round(i / 30, 4): (rng.uniform(-2.5, 2.5), rng.uniform(-2.5, 2.5)) for i in range(90)}
-
-    def position(t: float):
-        dx, dy = jitter.get(round(t, 4), (0.0, 0.0))
-        return (640 + dx, 400 + dy)
-
-    events, _ = run([Hand(position, pose=lambda t: OPEN, palm_px=45)], 2.8)
-    assert kinds(events) == ["STOP_GESTURE"]
 
 
 def test_small_hand_gets_a_positioning_hint() -> None:

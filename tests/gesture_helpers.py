@@ -89,6 +89,12 @@ PINCH = Pose(
 C_SIDEWAYS = Pose(HALF_HEART.fingers, HALF_HEART.thumb_dir, HALF_HEART.thumb_bend, 90.0, True)
 
 
+def index_curl(fraction: float) -> Pose:
+    """POINTING with the index finger curled by ``fraction`` of a fist curl (a finger flick)."""
+    index = tuple(a * fraction for a in CURLED)
+    return Pose({**POINTING.fingers, "index": index}, POINTING.thumb_dir, POINTING.thumb_bend)
+
+
 def _chain(
     base: np.ndarray, direction: np.ndarray, lengths, bends, toward: np.ndarray | None = None
 ) -> list[np.ndarray]:
