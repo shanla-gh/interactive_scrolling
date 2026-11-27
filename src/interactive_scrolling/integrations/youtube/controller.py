@@ -9,6 +9,16 @@ the one whose window was focused most recently is chosen; if that is undecidable
 rejected. A command is sent to exactly one tab and carries the expected video id, so it is
 rejected if the user scrolled in the meantime.
 
+Transient states
+----------------
+Right after a navigation the page briefly reports no Short (single-page transition) and the new
+Short then loads for a few hundred milliseconds. These states are reported as *transient*
+(``ControllerCheck.transient``) while a Shorts page was seen less than ``SHORTS_GRACE_S`` ago, so
+the dispatcher can wait briefly for the new Short instead of rejecting a quick repeated
+gesture (the page itself also waits, bounded, for a loading Short before clicking). At the
+first Short the page reports that no previous Short exists and "previous" is refused
+immediately.
+
 Tab target policy
 -----------------
 Tab navigation does not need a Shorts page (the user must be able to leave Shorts and come
@@ -41,6 +51,8 @@ from interactive_scrolling.integrations.youtube.protocol import CommandResult
 log = logging.getLogger(__name__)
 
 CONTEXT_MAX_AGE_S = 5.0
+SHORTS_GRACE_S = 1.5
+"""A Shorts page seen this recently makes its absence or loading state transient."""
 _OUTCOMES = {
     "succeeded": ActionStatus.SUCCEEDED,
     "no_change": ActionStatus.NO_CHANGE,
@@ -83,16 +95,30 @@ class YouTubeShortsController:
         self._on_shorts_session = on_shorts_session
         self._session_active = False
         self._session_lock = threading.Lock()
+        self._shorts_seen_ns: int | None = None
+        self._arriving: tuple[str, str, int] | None = None
+        """(client id, video id, time) of the Short a confirmed navigation moved to, until the
+        browser reports it."""
 
     # ------------------------------------------------------------------ target selection
 
-    def _target(self) -> tuple[ClientInfo | None, str]:
+    def _target(self, action: ActionType | None = None) -> tuple[ClientInfo | None, str]:
+        client, reason, _ = self._shorts_target(action)
+        return client, reason
+
+    def _recently_seen(self, now: int) -> bool:
+        seen = self._shorts_seen_ns
+        return seen is not None and now - seen <= int(SHORTS_GRACE_S * NS_PER_S)
+
+    def _shorts_target(self, action: ActionType | None) -> tuple[ClientInfo | None, str, bool]:
+        """(client, refusal reason, whether the refusal is transient)."""
         if not self.bridge.listening:
-            return None, self.bridge.error or "browser bridge not running"
+            return None, self.bridge.error or "browser bridge not running", False
         clients = self.bridge.clients()
         if not clients:
-            return None, "browser extension not connected"
+            return None, "browser extension not connected", False
         now = self._clock()
+        recent = self._recently_seen(now)
         max_age = int(CONTEXT_MAX_AGE_S * NS_PER_S)
         fresh = [
             c
@@ -100,25 +126,45 @@ class YouTubeShortsController:
             if c.context is not None and c.context_ns is not None and now - c.context_ns <= max_age
         ]
         if not fresh:
-            return None, "waiting for the browser to report its state"
+            return None, "waiting for the browser to report its state", recent
         with_shorts = [c for c in fresh if c.context.shorts is not None]  # type: ignore[union-attr]
         if not with_shorts:
-            return None, "no YouTube Shorts tab is active in the browser"
+            if recent:
+                return None, "the Short is changing", True
+            return None, "no YouTube Shorts tab is active in the browser", False
         ready = [
             c
             for c in with_shorts
             if c.context.shorts.visible and c.context.shorts.has_video  # type: ignore[union-attr]
         ]
         if not ready:
-            return None, "the Shorts tab is not visible or has no video"
+            return None, "the Shorts tab is not visible or has no video", recent
+        self._shorts_seen_ns = now
         loaded = [c for c in ready if c.context.shorts.video_ready is not False]  # type: ignore[union-attr]
         if not loaded:
-            return None, "the Short is still loading"
+            return None, "the Short is still loading", True
         ready = loaded
         ready.sort(key=lambda c: c.context.focus_ts, reverse=True)  # type: ignore[union-attr]
         if len(ready) > 1 and ready[0].context.focus_ts == ready[1].context.focus_ts:  # type: ignore[union-attr]
-            return None, "several browsers show Shorts; click the one to control"
-        return ready[0], ""
+            return None, "several browsers show Shorts; click the one to control", False
+        client = ready[0]
+        shorts = client.context.shorts  # type: ignore[union-attr]
+        arriving = self._arriving
+        if arriving is not None:
+            client_id, video_id, since = arriving
+            if client.client_id != client_id or shorts.video_id == video_id:
+                self._arriving = None
+            elif now - since <= int(SHORTS_GRACE_S * NS_PER_S):
+                # The page moved on but its report has not arrived yet: a command now would
+                # carry the previous Short's id and be refused by the page.
+                return None, "the Short is changing", True
+            else:
+                self._arriving = None
+        if action is ActionType.PREVIOUS_SHORT and shorts.can_previous is False:
+            return None, "already at the first Short", False
+        if action is ActionType.NEXT_SHORT and shorts.can_next is False:
+            return None, "no next Short available", False
+        return client, "", False
 
     def _tab_target(self) -> tuple[ClientInfo | None, str]:
         if not self.bridge.listening:
@@ -149,19 +195,21 @@ class YouTubeShortsController:
     def _target_for(self, action: ActionType) -> tuple[ClientInfo | None, str]:
         if action in TAB_ACTIONS:
             return self._tab_target()
-        return self._target()
+        return self._target(action)
 
     def check(self, action: ActionType) -> ControllerCheck:
         if action not in SHORTS_ACTIONS and action not in TAB_ACTIONS:
             return ControllerCheck(False, "action not supported by the browser controller")
-        client, reason = self._target_for(action)
-        if action in SHORTS_ACTIONS:
-            self._update_session(client is not None)
-        return ControllerCheck(client is not None, reason)
+        if action in TAB_ACTIONS:
+            client, reason = self._tab_target()
+            return ControllerCheck(client is not None, reason)
+        client, reason, transient = self._shorts_target(action)
+        self._update_session(client is not None or transient)
+        return ControllerCheck(client is not None, reason, transient=transient)
 
     def status(self) -> YouTubeStatus:
-        client, reason = self._target()
-        self._update_session(client is not None)
+        client, reason, transient = self._shorts_target(None)
+        self._update_session(client is not None or transient)
         clients = self.bridge.clients()
         shorts = client.context.shorts if client and client.context else None
         return YouTubeStatus(
@@ -193,6 +241,8 @@ class YouTubeShortsController:
         if isinstance(response, str):
             # No confirmation: the command may or may not have taken effect.
             return ActionResult(ActionStatus.UNKNOWN, response)
+        if response.outcome == "succeeded" and response.video_id_after:
+            self._arriving = (client.client_id, response.video_id_after, self._clock())
         return self._to_result(response)
 
     @staticmethod
@@ -216,8 +266,8 @@ class YouTubeShortsController:
 
     def refresh(self) -> None:
         """Re-evaluate the Shorts session state (called on bridge changes and periodically)."""
-        client, _ = self._target()
-        self._update_session(client is not None)
+        client, _, transient = self._shorts_target(None)
+        self._update_session(client is not None or transient)
 
     def _update_session(self, active: bool) -> None:
         with self._session_lock:

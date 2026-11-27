@@ -47,6 +47,9 @@ AdmissionCheck = Callable[[ActionRecord], str | None]
 """Returns a reason to refuse the action, or ``None`` (wellbeing pause, co-op arbitration)."""
 ModeListener = Callable[[ControlMode, ControlMode, str], None]
 
+TRANSIENT_WAIT_S = 1.2
+"""Longest wait for a transient controller state (a Short changing or loading)."""
+TRANSIENT_POLL_S = 0.03
 ACTION_TIMEOUT_S = {
     ActionType.NEXT_SHORT: 3.0,
     ActionType.PREVIOUS_SHORT: 3.0,
@@ -237,6 +240,16 @@ class ActionDispatcher:
             self._finish(record, ActionStatus.REJECTED, f"stale gesture ({age / 1e6:.0f} ms old)")
             return
         check = controller.check(record.action)
+        # A transient state (the Short is changing or loading after the previous action) is
+        # waited out for a bounded time; this is a single attempt, not a retry.
+        deadline = self._clock() + int(TRANSIENT_WAIT_S * NS_PER_S)
+        while not check.ready and check.transient and self._clock() < deadline:
+            time.sleep(TRANSIENT_POLL_S)
+            with self._lock:
+                if generation != self._generation or self._mode is not ControlMode.LIVE_CONTROL:
+                    self._finish(record, ActionStatus.REJECTED, "live control was disabled")
+                    return
+            check = controller.check(record.action)
         if not check.ready:
             self._finish(record, ActionStatus.REJECTED, check.reason)
             return

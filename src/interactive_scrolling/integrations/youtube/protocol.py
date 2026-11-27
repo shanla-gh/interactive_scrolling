@@ -51,6 +51,10 @@ class ShortsTab:
     paused: bool | None
     liked: bool | None
     signed_in: bool | None
+    can_previous: bool | None = None
+    """A previous Short exists (``False`` at the first Short of a feed); ``None`` if unknown
+    (extension versions before 0.4)."""
+    can_next: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +174,8 @@ def parse(raw: str | bytes) -> Message:
                 paused=_optional_bool(shorts, "paused"),
                 liked=_optional_bool(shorts, "liked"),
                 signed_in=_optional_bool(shorts, "signed_in"),
+                can_previous=_optional_bool(shorts, "can_previous"),
+                can_next=_optional_bool(shorts, "can_next"),
             )
         return Context(focused, float(focus_ts), tab)
     if kind == "result":

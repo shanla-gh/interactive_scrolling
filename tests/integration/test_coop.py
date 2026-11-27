@@ -130,12 +130,12 @@ def test_guest_controls_the_host_feed_only_after_approval(pair) -> None:
     records = []
     guest_dispatcher.add_record_listener(records.append)
     join(host, guest, code, guest_dispatcher, approve=False)
-    early = guest_dispatcher.submit(event(G.INDEX_SWIPE_DOWN))
+    early = guest_dispatcher.submit(event(G.INDEX_SWIPE_UP))
     assert wait_until(lambda: final(records, early.record_id) is not None)
     assert "approve" in final(records, early.record_id).reason
     host.approve()
     assert wait_until(lambda: guest.approved)
-    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_DOWN))
+    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_UP))
     assert wait_until(lambda: final(records, record.record_id) is not None, timeout_s=5)
     done = final(records, record.record_id)
     assert done.status is ActionStatus.SUCCEEDED, done
@@ -169,8 +169,8 @@ def test_simultaneous_gestures_execute_once(pair) -> None:
     host_dispatcher.set_mode(ControlMode.LIVE_CONTROL)
     join(host, guest, code, guest_dispatcher)
     threads = [
-        threading.Thread(target=lambda: host_dispatcher.submit(event(G.INDEX_SWIPE_DOWN))),
-        threading.Thread(target=lambda: guest_dispatcher.submit(event(G.INDEX_SWIPE_DOWN))),
+        threading.Thread(target=lambda: host_dispatcher.submit(event(G.INDEX_SWIPE_UP))),
+        threading.Thread(target=lambda: guest_dispatcher.submit(event(G.INDEX_SWIPE_UP))),
     ]
     for t in threads:
         t.start()
@@ -187,13 +187,13 @@ def test_shared_cooldown_rejects_a_second_action_right_after_the_first(pair) -> 
     records = []
     guest_dispatcher.add_record_listener(records.append)
     join(host, guest, code, guest_dispatcher)
-    host_dispatcher.submit(event(G.INDEX_SWIPE_DOWN))
+    host_dispatcher.submit(event(G.INDEX_SWIPE_UP))
     assert wait_until(lambda: browser.executed == [ActionType.NEXT_SHORT])
-    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_UP))
+    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_DOWN))
     assert wait_until(lambda: final(records, record.record_id) is not None)
     assert "shared cooldown" in final(records, record.record_id).reason
     time.sleep(0.6)
-    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_UP))
+    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_DOWN))
     assert wait_until(lambda: final(records, record.record_id) is not None)
     assert final(records, record.record_id).status is ActionStatus.SUCCEEDED
 
@@ -206,13 +206,13 @@ def test_host_can_switch_off_shared_control_and_emergency_disable_blocks_guests(
     join(host, guest, code, guest_dispatcher)
     host.set_shared_control(False)
     assert wait_until(lambda: not guest.shared_control)
-    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_DOWN))
+    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_UP))
     assert wait_until(lambda: final(records, record.record_id) is not None)
     assert "shared control is off" in final(records, record.record_id).reason
     host.set_shared_control(True)
     assert wait_until(lambda: guest.shared_control)
     host_dispatcher.emergency_disable()
-    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_DOWN))
+    record = guest_dispatcher.submit(event(G.INDEX_SWIPE_UP))
     assert wait_until(lambda: final(records, record.record_id) is not None)
     assert final(records, record.record_id).status is ActionStatus.NOT_EXECUTED
     assert browser.executed == []

@@ -8,15 +8,19 @@ account. ``tests/live/`` covers the real website (opt-in).
 from __future__ import annotations
 
 import socket
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from interactive_scrolling.actions.types import ActionStatus, ActionType
+from interactive_scrolling.actions.dispatcher import ActionDispatcher
+from interactive_scrolling.actions.types import ActionRecord, ActionStatus, ActionType, ControlMode
+from interactive_scrolling.gestures.types import GestureEvent, GestureType
 from interactive_scrolling.integrations.youtube.bridge import BridgeServer
 from interactive_scrolling.integrations.youtube.controller import YouTubeShortsController
+from interactive_scrolling.vision.landmarks import Handedness
 from tests.browser_helpers import Browser, Session, find_browser, serve_youtube_fixture
 from tests.helpers import wait_until
 
@@ -105,13 +109,54 @@ def test_next_and_previous_navigate_exactly_one_short(stack) -> None:
     assert current_id(page) == "aaaaaaaaaa1"
 
 
-def test_previous_on_first_short_is_rejected(stack) -> None:
+@pytest.mark.parametrize("style", ["", "&nav_style=disabled"])
+def test_previous_on_first_short_is_rejected_immediately(stack, style) -> None:
+    """Regression (Director test, Nov 2026): on the live site the previous button at the first
+    Short is hidden but not disabled; clicking it did nothing and every attempt waited 3 s
+    before failing."""
     _, _, controller, page = stack
-    open_short(page, controller, "?signed_in=1")
-    result = run(controller, ActionType.PREVIOUS_SHORT)
+    open_short(page, controller, "?signed_in=1" + style)
+    check = controller.check(ActionType.PREVIOUS_SHORT)
+    assert not check.ready and check.reason == "already at the first Short"
+    # The page refuses it as well if a command arrives anyway (e.g. an older app).
+    started = time.perf_counter()
+    result = controller.execute(ActionType.PREVIOUS_SHORT, uuid.uuid4().hex, 3.0)
     assert result.status is ActionStatus.REJECTED
-    assert "first" in result.reason
+    assert result.reason == "already at the first Short"
+    assert time.perf_counter() - started < 0.5
     assert current_id(page) == "aaaaaaaaaa1"
+
+
+def test_rapid_navigation_through_the_dispatcher_executes_every_gesture(stack) -> None:
+    """Regression (live probe, Nov 2026): a gesture right after a navigation was rejected with
+    "no YouTube Shorts tab is active" while the page reported the new Short."""
+    _, _, controller, page = stack
+    open_short(page, controller, "?signed_in=1&load_ms=300")
+    records: list[ActionRecord] = []
+    dispatcher = ActionDispatcher(controller)
+    dispatcher.add_record_listener(records.append)
+    dispatcher.set_mode(ControlMode.LIVE_CONTROL)
+    try:
+        outcomes = []
+        for _ in range(2):
+            gesture = GestureEvent(
+                GestureType.INDEX_SWIPE_UP, time.perf_counter_ns(), 1, Handedness.RIGHT
+            )
+            record = dispatcher.submit(gesture, action=ActionType.NEXT_SHORT)
+
+            def done(rid=record.record_id):
+                return [r for r in records if r.record_id == rid and r.status.final]
+
+            assert wait_until(done, timeout_s=6)
+            outcomes.append((done()[-1].status, done()[-1].reason))
+        assert outcomes == [(ActionStatus.SUCCEEDED, ""), (ActionStatus.SUCCEEDED, "")]
+        assert current_id(page) == "cccccccccc3"
+        check = controller.check(ActionType.NEXT_SHORT)
+        assert wait_until(
+            lambda: controller.check(ActionType.NEXT_SHORT).reason == "no next Short available"
+        ), check
+    finally:
+        dispatcher.shutdown()
 
 
 def test_navigation_without_effect_is_reported_failed_not_succeeded(stack) -> None:

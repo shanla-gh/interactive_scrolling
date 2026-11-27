@@ -278,7 +278,13 @@ chrome.tabs.onActivated.addListener(() => sendContext(false));
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // A tab that navigates away must not keep its previous Shorts state until its new page
   // reports (the new page may not run the content script at all).
-  if (changeInfo.url !== undefined || changeInfo.status === "loading") tabStates.delete(tabId);
+  if (changeInfo.url !== undefined || changeInfo.status === "loading") {
+    tabStates.delete(tabId);
+    // The page's content script may already have reported its new state before this event
+    // arrived (Shorts navigation is a single-page transition); ask it to report again so the
+    // app does not see "no Shorts tab" until something else changes.
+    chrome.tabs.sendMessage(tabId, { kind: "report_request" }).catch(() => {});
+  }
   sendContext(false);
 });
 chrome.windows.onFocusChanged.addListener((windowId) => {

@@ -8,6 +8,10 @@
     signed_in=1   show the avatar button instead of the "Sign in" link
     liked=<id>    start with this Short already liked
     broken_nav=1  navigation buttons do nothing (to test unconfirmed navigation)
+    nav_style=disabled  mark unavailable navigation with the disabled attribute; by default
+                  the unavailable button's host is hidden (aria-hidden, visibility: hidden)
+                  while the button stays enabled, as on the live site at the first Short
+    load_ms=<n>   after a navigation the new Short's video needs n ms to load
 -->
 <head>
   <meta charset="utf-8" />
@@ -52,11 +56,25 @@
       const down = document.querySelector("#navigation-button-down button");
       const video = document.querySelector("#shorts-player video");
       const current = () => location.pathname.split("/")[2];
+      function setAvailable(button, available) {
+        const host = button.parentElement;
+        if (params.get("nav_style") === "disabled") {
+          button.disabled = !available;
+          return;
+        }
+        if (available) {
+          host.removeAttribute("aria-hidden");
+          host.style.visibility = "visible";
+        } else {
+          host.setAttribute("aria-hidden", "");
+          host.style.visibility = "hidden";
+        }
+      }
       function render() {
         const index = ids.indexOf(current());
         like.setAttribute("aria-pressed", liked.has(current()) ? "true" : "false");
-        up.disabled = index <= 0;
-        down.disabled = index >= ids.length - 1;
+        setAvailable(up, index > 0);
+        setAvailable(down, index < ids.length - 1);
       }
       function go(delta) {
         if (params.get("broken_nav") === "1") return;
@@ -69,6 +87,14 @@
           history.pushState({}, "", "/shorts/" + next + location.search);
           document.querySelector("toggle-button-view-model label").appendChild(like);
           render();
+          const loadMs = Number(params.get("load_ms") || 0);
+          if (loadMs > 0) {
+            video.srcObject = null;
+            setTimeout(() => {
+              video.srcObject = stream;
+              video.play().catch(() => {});
+            }, loadMs);
+          }
           window.dispatchEvent(new Event("yt-navigate-finish"));
         }, 120);
       }
@@ -87,7 +113,8 @@
       const ctx = canvas.getContext("2d");
       let frame = 0;
       setInterval(() => { ctx.fillStyle = `hsl(${(frame++ * 7) % 360},60%,40%)`; ctx.fillRect(0, 0, 72, 128); }, 66);
-      video.srcObject = canvas.captureStream(15);
+      const stream = canvas.captureStream(15);
+      video.srcObject = stream;
       render();
       video.play().catch(() => {});
     })();

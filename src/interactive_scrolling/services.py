@@ -347,6 +347,9 @@ def build_services(data_dir: Path | None = None, start_bridge: bool = True) -> C
     """Create the production services from the persisted user settings."""
     store = SettingsStore(data_dir / "settings.json" if data_dir else None)
     user = store.load()
+    if store.migrations:
+        # Persist migrated settings at once, so a migration (and its notice) happens once.
+        store.save(user)
     analytics = AnalyticsStore(
         data_dir / "analytics.sqlite3" if data_dir else None, enabled=user.analytics_enabled
     )

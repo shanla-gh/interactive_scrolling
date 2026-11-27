@@ -15,7 +15,14 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (sender.id !== chrome.runtime.id || !message || message.kind !== "command") return false;
+    if (sender.id !== chrome.runtime.id || !message) return false;
+    if (message.kind === "report_request") {
+      // The service worker dropped this tab's state after a URL change; send it again even if
+      // it looks unchanged from here.
+      report(true);
+      return false;
+    }
+    if (message.kind !== "command") return false;
     const { id, action, video_id: expected, timeout_ms: timeout } = message;
     if (typeof id !== "string" || handled.has(id)) {
       sendResponse({ outcome: "rejected", reason: "duplicate command" });
@@ -38,5 +45,14 @@
   document.addEventListener("play", () => report(false), true);
   document.addEventListener("pause", () => report(false), true);
   setInterval(() => report(false), 1000);
+  // Shorts navigation is a single-page transition: report the new Short as soon as the URL
+  // changes instead of waiting for the next periodic check.
+  let lastPath = location.pathname;
+  setInterval(() => {
+    if (location.pathname !== lastPath) {
+      lastPath = location.pathname;
+      report(true);
+    }
+  }, 100);
   report(true);
 })();

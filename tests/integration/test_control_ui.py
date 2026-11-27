@@ -30,7 +30,7 @@ W, H = 640, 480
 
 
 class SwipeScript:
-    """A pointing hand that rests, swipes down, rests, and repeats every 3 s."""
+    """A pointing hand that rests, swipes up (next Short), rests, and repeats every 3 s."""
 
     def __init__(self) -> None:
         self.t0: int | None = None
@@ -39,7 +39,7 @@ class SwipeScript:
         if self.t0 is None:
             self.t0 = ms
         t = ((ms - self.t0) / 1000.0) % 3.0
-        y = 150.0 if t < 1.2 else 150.0 + min(1.0, (t - 1.2) / 0.25) * 120.0
+        y = 300.0 if t < 1.2 else 300.0 - min(1.0, (t - 1.2) / 0.25) * 120.0
         return (make_observation_scaled((320.0, y)),)
 
 
@@ -121,10 +121,10 @@ def test_gesture_test_mode_shows_and_logs_gestures_without_executing(qtbot, tmp_
     )
     assert services.dispatcher.mode is ControlMode.GESTURE_TEST
     qtbot.waitUntil(lambda: window.history.rowCount() >= 1, timeout=8000)
-    assert window.history.item(0, 1).text() == "SWIPE DOWN"
+    assert window.history.item(0, 1).text() == "SWIPE UP"
     assert window.history.item(0, 2).text() == "Next Short"
     assert window.history.item(0, 3).text().startswith("not executed")
-    assert window.gesture_panel.last.text() == "SWIPE DOWN"
+    assert window.gesture_panel.last.text() == "SWIPE UP"
     assert controller.executed == []
     assert window.video._banner is not None or window.history.rowCount() >= 1
 

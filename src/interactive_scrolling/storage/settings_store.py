@@ -49,7 +49,7 @@ from interactive_scrolling.storage.paths import data_dir
 
 log = logging.getLogger(__name__)
 
-SETTINGS_VERSION = 2
+SETTINGS_VERSION = 3
 
 _V1_RENAMED = {
     "finger_swipe_min_distance_palms": "swipe_min_distance_palms",
@@ -229,6 +229,22 @@ def _mapping_from_json(data: Any, warnings: list[str]) -> dict[GestureType, Acti
     return mapping
 
 
+_V2_VERTICAL_DEFAULT = {"index_swipe_down": "next_short", "index_swipe_up": "previous_short"}
+VERTICAL_DIRECTION_NOTICE = (
+    "Scroll direction updated: move your finger UP for the next video and DOWN for the "
+    "previous one (like a touchscreen). You can change this in Settings."
+)
+
+
+def _migrate_mapping_v2(data: dict[str, Any], migrations: list[str]) -> dict[str, Any]:
+    """Version 2 default: finger down = next. Brief 004 makes finger up = next the default.
+    Only an untouched old default is changed; any customised vertical mapping is kept."""
+    if all(data.get(k) == v for k, v in _V2_VERTICAL_DEFAULT.items()):
+        data = {**data, "index_swipe_up": "next_short", "index_swipe_down": "previous_short"}
+        migrations.append(VERTICAL_DIRECTION_NOTICE)
+    return data
+
+
 class SettingsStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or data_dir() / "settings.json"
@@ -261,10 +277,13 @@ class SettingsStore:
             self.migrations.append("action mapping migrated to the Brief 003 gestures")
         if version == 1:
             self._backup_v1()
+        mapping_data = raw.get("mapping")
+        if version == 2 and isinstance(mapping_data, dict):
+            mapping_data = _migrate_mapping_v2(mapping_data, self.migrations)
         for step in self.migrations:
             log.info("Settings migration: %s", step)
         gestures = _gesture_settings_from_json(gesture_data, warnings)
-        mapping = _mapping_from_json(raw.get("mapping"), warnings)
+        mapping = _mapping_from_json(mapping_data, warnings)
         analytics = raw.get("analytics_enabled", True)
         if not isinstance(analytics, bool):
             warnings.append("analytics_enabled must be true/false; default used")

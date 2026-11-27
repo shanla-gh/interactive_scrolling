@@ -54,7 +54,7 @@ class FakeController:
         self.cancelled.set()
 
 
-def event(gesture: GestureType = G.INDEX_SWIPE_DOWN, age_s: float = 0.0) -> GestureEvent:
+def event(gesture: GestureType = G.INDEX_SWIPE_UP, age_s: float = 0.0) -> GestureEvent:
     return GestureEvent(gesture, time.perf_counter_ns() - int(age_s * 1e9), 1, Handedness.RIGHT)
 
 
@@ -115,7 +115,8 @@ def test_live_control_executes_mapped_action_with_confirmation(records) -> None:
 @pytest.mark.parametrize(
     ("gesture", "action"),
     [
-        (G.INDEX_SWIPE_UP, ActionType.PREVIOUS_SHORT),
+        (G.INDEX_SWIPE_UP, ActionType.NEXT_SHORT),
+        (G.INDEX_SWIPE_DOWN, ActionType.PREVIOUS_SHORT),
         (G.HALF_HEART, ActionType.LIKE_SHORT),
         (G.STOP_GESTURE, ActionType.TOGGLE_PLAYBACK),
         (G.INDEX_SWIPE_RIGHT, ActionType.NEXT_BROWSER_TAB),
@@ -225,12 +226,12 @@ def test_unmapped_gesture_is_not_executed(records) -> None:
 def test_custom_mapping_is_used(records) -> None:
     controller = FakeController()
     mapping = validate_mapping(
-        {G.INDEX_SWIPE_DOWN: ActionType.PREVIOUS_SHORT, G.INDEX_SWIPE_UP: ActionType.NEXT_SHORT}
+        {G.INDEX_SWIPE_DOWN: ActionType.NEXT_SHORT, G.INDEX_SWIPE_UP: ActionType.PREVIOUS_SHORT}
     )
     dispatcher = make(controller, records, mapping=mapping)
     submitted = dispatcher.submit(event(G.INDEX_SWIPE_DOWN))
     assert wait_until(lambda: final(records, submitted.record_id) is not None)
-    assert controller.executed == [ActionType.PREVIOUS_SHORT]
+    assert controller.executed == [ActionType.NEXT_SHORT]
     dispatcher.shutdown()
 
 
@@ -281,3 +282,77 @@ def test_mode_listeners_are_notified(records) -> None:
         (ControlMode.LIVE_CONTROL, ControlMode.TRACKING_ONLY, "emergency disable"),
     ]
     dispatcher.shutdown()
+
+
+class TransientController(FakeController):
+    """Not ready for the first ``transient_checks`` checks (a Short changing), then ready."""
+
+    def __init__(self, transient_checks: int, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.remaining = transient_checks
+        self.checks = 0
+
+    def check(self, action: ActionType) -> ControllerCheck:
+        self.checks += 1
+        if self.remaining > 0:
+            self.remaining -= 1
+            return ControllerCheck(False, "the Short is changing", transient=True)
+        return ControllerCheck(True)
+
+
+def test_transient_state_is_waited_out_once_not_rejected(records) -> None:
+    """Regression (Director test, Nov 2026): a gesture made while the previous navigation was
+    still settling was rejected with "no YouTube Shorts tab is active"."""
+    controller = TransientController(transient_checks=5)
+    dispatcher = make(controller, records)
+    try:
+        record = dispatcher.submit(event())
+        assert wait_until(lambda: final(records, record.record_id) is not None, timeout_s=3)
+        assert final(records, record.record_id).status is ActionStatus.SUCCEEDED
+        assert controller.executed == [ActionType.NEXT_SHORT]
+    finally:
+        dispatcher.shutdown()
+
+
+def test_transient_wait_is_bounded(records) -> None:
+    controller = TransientController(transient_checks=10_000)
+    dispatcher = make(controller, records)
+    try:
+        started = time.perf_counter()
+        record = dispatcher.submit(event())
+        assert wait_until(lambda: final(records, record.record_id) is not None, timeout_s=4)
+        elapsed = time.perf_counter() - started
+        result = final(records, record.record_id)
+        assert result.status is ActionStatus.REJECTED
+        assert result.reason == "the Short is changing"
+        assert controller.executed == []
+        assert 1.0 <= elapsed <= 2.5
+    finally:
+        dispatcher.shutdown()
+
+
+def test_emergency_disable_ends_a_transient_wait(records) -> None:
+    controller = TransientController(transient_checks=10_000)
+    dispatcher = make(controller, records)
+    try:
+        record = dispatcher.submit(event())
+        assert wait_until(lambda: controller.checks >= 2)
+        dispatcher.emergency_disable()
+        assert wait_until(lambda: final(records, record.record_id) is not None, timeout_s=3)
+        assert final(records, record.record_id).status is ActionStatus.REJECTED
+        assert controller.executed == []
+    finally:
+        dispatcher.shutdown()
+
+
+def test_non_transient_refusal_is_not_waited_for(records) -> None:
+    controller = FakeController(ready=False, reason="already at the first Short")
+    dispatcher = make(controller, records)
+    try:
+        started = time.perf_counter()
+        record = dispatcher.submit(event())
+        assert wait_until(lambda: final(records, record.record_id) is not None, timeout_s=2)
+        assert time.perf_counter() - started < 0.5
+        assert final(records, record.record_id).reason == "already at the first Short"
+    finally:
+        dispatcher.shutdown()

@@ -63,6 +63,8 @@
       paused: video ? video.paused : null,
       liked: like ? like.getAttribute("aria-pressed") === "true" : null,
       signed_in: id ? signedIn() : null,
+      can_previous: id ? navigationAvailable("up") : null,
+      can_next: id ? navigationAvailable("down") : null,
     };
   }
 
@@ -86,22 +88,41 @@
     return button.disabled || button.getAttribute("aria-disabled") === "true";
   }
 
+  function isHiddenHost(direction) {
+    // At the first Short of a feed YouTube keeps the "previous" button in the layout but hides
+    // its host (aria-hidden, visibility: hidden, opacity 0); a click on it does nothing
+    // (verified on the live site, Nov 2026).
+    const host = document.querySelector(`#navigation-button-${direction}`);
+    if (!host) return true;
+    const aria = host.getAttribute("aria-hidden");
+    if (aria !== null && aria !== "false") return true;
+    const style = getComputedStyle(host);
+    return style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0;
+  }
+
+  function boundaryReason(direction) {
+    return direction === "up" ? "already at the first Short" : "no next Short available";
+  }
+
+  function navigationAvailable(direction) {
+    const button = navigationButton(direction);
+    return !!button && isVisible(button) && !isDisabled(button) && !isHiddenHost(direction);
+  }
+
   async function navigate(direction, timeoutMs) {
+    const started = performance.now();
+    // YouTube ignores navigation until the active video has loaded; a gesture made while the
+    // next Short is still loading waits for it (bounded) instead of failing.
+    const ready = await waitFor(() => {
+      const video = activeVideo();
+      return video !== null && video.readyState >= 2;
+    }, Math.min(1500, timeoutMs / 2));
+    if (!ready) return result("rejected", "the Short is still loading");
     const before = videoIdFromLocation();
     const button = navigationButton(direction);
-    if (!button || !isVisible(button)) {
-      return result(
-        "rejected",
-        direction === "up" ? "no previous Short available" : "no next Short available"
-      );
-    }
-    if (isDisabled(button)) {
-      return result(
-        "rejected",
-        direction === "up" ? "already at the first Short" : "no next Short available"
-      );
-    }
+    if (!navigationAvailable(direction)) return result("rejected", boundaryReason(direction));
     button.click();
+    timeoutMs = Math.max(200, timeoutMs - (performance.now() - started));
     const changed = await waitFor(() => {
       const now = videoIdFromLocation();
       return now && now !== before ? now : null;
@@ -168,7 +189,8 @@
     if (expectedVideoId && state.video_id !== expectedVideoId) {
       return result("rejected", "the active Short changed before the action");
     }
-    if (action !== "like_short" && !state.video_ready) {
+    const navigation = action === "next_short" || action === "previous_short";
+    if (action !== "like_short" && !navigation && !state.video_ready) {
       return result("rejected", "the Short is still loading");
     }
     return handler(Math.max(200, Math.min(timeoutMs || 2500, 5000)));

@@ -79,9 +79,12 @@ LEGACY_ACTION_NAMES = {
 CONFIGURABLE_GESTURES = tuple(GestureType)
 """Every gesture can be mapped to any available action (or to none)."""
 
+# Physical finger movement -> content: moving the finger UP shows the NEXT Short, like pushing
+# the feed up on a touchscreen (the Director's natural direction, Brief 004). Settings of
+# version 2 that still had the old default (down = next) are migrated, see settings_store.
 DEFAULT_MAPPING: dict[GestureType, ActionType] = {
-    GestureType.INDEX_SWIPE_DOWN: ActionType.NEXT_SHORT,
-    GestureType.INDEX_SWIPE_UP: ActionType.PREVIOUS_SHORT,
+    GestureType.INDEX_SWIPE_UP: ActionType.NEXT_SHORT,
+    GestureType.INDEX_SWIPE_DOWN: ActionType.PREVIOUS_SHORT,
     GestureType.INDEX_SWIPE_RIGHT: ActionType.NEXT_BROWSER_TAB,
     GestureType.INDEX_SWIPE_LEFT: ActionType.PREVIOUS_BROWSER_TAB,
     GestureType.HALF_HEART: ActionType.LIKE_SHORT,
@@ -138,6 +141,9 @@ class ActionResult:
 class ControllerCheck:
     ready: bool
     reason: str = ""
+    transient: bool = False
+    """Not ready only for a moment (the Short is changing or still loading): the dispatcher
+    may wait briefly instead of rejecting."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,6 +15,8 @@ from interactive_scrolling.config.settings import (
 from interactive_scrolling.gestures.types import GestureType
 from interactive_scrolling.storage.settings_store import (
     DEFAULT_BRIDGE_PORT,
+    SETTINGS_VERSION,
+    VERTICAL_DIRECTION_NOTICE,
     SettingsStore,
     UserSettings,
 )
@@ -172,10 +174,52 @@ def test_version_1_settings_are_migrated_without_losing_user_choices(tmp_path: P
     assert store.migrations
     backup = tmp_path / "settings.json.v1-backup"
     assert json.loads(backup.read_text(encoding="utf-8")) == v1
-    # Saving writes version 2; loading it again needs no migration and keeps the backup.
+    # Saving writes the current version; loading it again needs no migration.
     assert store.save(settings)
     again = SettingsStore(path)
     assert again.load() == settings
     assert again.migrations == []
-    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == SETTINGS_VERSION
     assert json.loads(backup.read_text(encoding="utf-8")) == v1
+
+
+def _v2_file(path: Path, mapping: dict) -> None:
+    path.write_text(
+        json.dumps(
+            {"version": 2, "mapping": mapping, "pairing_token": "an-existing-pairing-token"}
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_version_2_default_vertical_mapping_becomes_finger_up_next(tmp_path: Path) -> None:
+    """Brief 004: the Director moves the finger up to see the next Short. The untouched old
+    default (down = next) is migrated once, with a notice."""
+    path = tmp_path / "settings.json"
+    _v2_file(
+        path,
+        {
+            "index_swipe_down": "next_short",
+            "index_swipe_up": "previous_short",
+            "half_heart": "like_short",
+        },
+    )
+    store = SettingsStore(path)
+    settings = store.load()
+    assert settings.mapping[GestureType.INDEX_SWIPE_UP] is ActionType.NEXT_SHORT
+    assert settings.mapping[GestureType.INDEX_SWIPE_DOWN] is ActionType.PREVIOUS_SHORT
+    assert store.migrations == [VERTICAL_DIRECTION_NOTICE]
+    assert store.save(settings)
+    again = SettingsStore(path)
+    assert again.load().mapping == settings.mapping
+    assert again.migrations == []
+
+
+def test_version_2_customised_vertical_mapping_is_kept(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    _v2_file(path, {"index_swipe_down": "like_short", "index_swipe_up": "previous_short"})
+    store = SettingsStore(path)
+    settings = store.load()
+    assert settings.mapping[GestureType.INDEX_SWIPE_DOWN] is ActionType.LIKE_SHORT
+    assert settings.mapping[GestureType.INDEX_SWIPE_UP] is ActionType.PREVIOUS_SHORT
+    assert store.migrations == []

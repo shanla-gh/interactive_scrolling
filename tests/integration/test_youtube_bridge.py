@@ -94,6 +94,8 @@ class FakeExtension:
         shorts: bool = True,
         loaded: bool = True,
         focused: bool = True,
+        can_previous: bool | None = None,
+        video_id: str = "abcdefghijk",
     ) -> None:
         payload = {
             "type": "context",
@@ -105,7 +107,7 @@ class FakeExtension:
             payload["shorts"] = {
                 "tab_id": 1,
                 "is_shorts": True,
-                "video_id": "abcdefghijk",
+                "video_id": video_id,
                 "visible": visible,
                 "has_video": True,
                 "video_ready": loaded,
@@ -114,6 +116,8 @@ class FakeExtension:
                 "signed_in": True,
                 "age_ms": 5,
             }
+            if can_previous is not None:
+                payload["shorts"]["can_previous"] = can_previous
         self.ws.send(json.dumps(payload))
 
     def close(self) -> None:
@@ -509,3 +513,78 @@ def test_tab_result_with_invalid_index_is_rejected_by_the_schema(server) -> None
     result = execute(controller, ActionType.NEXT_BROWSER_TAB, timeout=0.3)
     assert result.status is ActionStatus.UNKNOWN
     ext.close()
+
+
+def test_previous_at_the_first_short_is_refused_immediately(server) -> None:
+    """Regression (Director test, Nov 2026): at the first Short of a feed YouTube hides the
+    previous button without disabling it; every "previous" waited 3 s and failed."""
+    bridge, controller, _ = server
+    ext = FakeExtension(bridge.port)
+    try:
+        ext.context(can_previous=False)
+        assert wait_until(
+            lambda: (
+                controller.check(ActionType.PREVIOUS_SHORT).reason == "already at the first Short"
+            )
+        )
+        check = controller.check(ActionType.PREVIOUS_SHORT)
+        assert not check.ready and not check.transient
+        assert controller.check(ActionType.NEXT_SHORT).ready
+        ext.context(can_previous=True)
+        assert wait_until(lambda: controller.check(ActionType.PREVIOUS_SHORT).ready)
+    finally:
+        ext.close()
+
+
+def test_short_disappearing_during_navigation_is_transient(server) -> None:
+    bridge, controller, _ = server
+    ext = FakeExtension(bridge.port)
+    try:
+        ext.context()
+        assert wait_until(lambda: controller.check(ActionType.NEXT_SHORT).ready)
+        ext.context(shorts=False)
+        assert wait_until(lambda: not controller.check(ActionType.NEXT_SHORT).ready)
+        check = controller.check(ActionType.NEXT_SHORT)
+        assert check.transient and check.reason == "the Short is changing"
+        ext.context(loaded=False)
+        assert wait_until(
+            lambda: controller.check(ActionType.LIKE_SHORT).reason == "the Short is still loading"
+        )
+        assert controller.check(ActionType.LIKE_SHORT).transient
+    finally:
+        ext.close()
+
+
+def test_absent_shorts_page_is_not_transient_after_the_grace_period(server) -> None:
+    bridge, _, _ = server
+    clock = {"now": 10 * 10**9}
+    controller = YouTubeShortsController(bridge, clock=lambda: clock["now"])
+    ext = FakeExtension(bridge.port)
+    try:
+        ext.context(shorts=False)
+        assert wait_until(lambda: bool(bridge.clients()) and bridge.clients()[0].context)
+        clock["now"] = bridge.clients()[0].context_ns
+        check = controller.check(ActionType.NEXT_SHORT)
+        assert not check.ready and not check.transient
+        assert check.reason == "no YouTube Shorts tab is active in the browser"
+    finally:
+        ext.close()
+
+
+def test_command_after_a_navigation_waits_for_the_new_short_report(server) -> None:
+    """Regression (fixture test of quick repeated gestures): right after a confirmed
+    navigation the app still held the previous Short's id; the next command carried it and
+    the page refused it as "the active Short changed before the action"."""
+    bridge, controller, _ = server
+    ext = FakeExtension(bridge.port)
+    try:
+        ext.context()
+        assert wait_until(lambda: controller.check(ActionType.NEXT_SHORT).ready)
+        assert execute(controller).status is ActionStatus.SUCCEEDED  # -> bcdefghijkl
+        check = controller.check(ActionType.NEXT_SHORT)
+        assert not check.ready and check.transient
+        assert check.reason == "the Short is changing"
+        ext.context(video_id="bcdefghijkl")
+        assert wait_until(lambda: controller.check(ActionType.NEXT_SHORT).ready)
+    finally:
+        ext.close()

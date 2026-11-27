@@ -112,14 +112,14 @@ def test_reaching_the_limit_pauses_only_gesture_scrolling_and_the_user_can_resum
     assert services.wellbeing.scrolling_paused
     dispatcher = services.dispatcher
     dispatcher.set_mode(ControlMode.LIVE_CONTROL)
-    refused = dispatcher.submit(event(GestureType.INDEX_SWIPE_DOWN))
+    refused = dispatcher.submit(event(GestureType.INDEX_SWIPE_UP))
     assert refused.status is ActionStatus.REJECTED and "session limit" in refused.reason
     liked = dispatcher.submit(event(GestureType.HALF_HEART))  # likes keep working
     assert wait_until(lambda: ActionType.LIKE_SHORT in browser.executed)
     assert liked.status is ActionStatus.QUEUED
     services.pause_scrolling(False)
     assert wait_until(lambda: not dispatcher._busy)
-    accepted = dispatcher.submit(event(GestureType.INDEX_SWIPE_DOWN))
+    accepted = dispatcher.submit(event(GestureType.INDEX_SWIPE_UP))
     assert accepted.status is ActionStatus.QUEUED
     assert wait_until(lambda: ActionType.NEXT_SHORT in browser.executed)
     services.shutdown()

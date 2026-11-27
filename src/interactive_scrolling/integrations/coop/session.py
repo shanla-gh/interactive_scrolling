@@ -59,8 +59,8 @@ STALE_MS = 1500
 SHARED_COOLDOWN_S = 1.0
 PING_INTERVAL_S = 2.0
 GESTURE_FOR_ACTION = {
-    "next_short": GestureType.INDEX_SWIPE_DOWN,
-    "previous_short": GestureType.INDEX_SWIPE_UP,
+    "next_short": GestureType.INDEX_SWIPE_UP,
+    "previous_short": GestureType.INDEX_SWIPE_DOWN,
     "toggle_playback": GestureType.STOP_GESTURE,
 }
 SHARED = frozenset(ActionType(a) for a in p.SHARED_ACTIONS)

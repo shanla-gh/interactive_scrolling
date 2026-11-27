@@ -46,7 +46,7 @@ def test_host_and_guest_services_with_panel(qtbot) -> None:
     guest_services.dispatcher.set_mode(ControlMode.LIVE_CONTROL)
     records = []
     guest_services.dispatcher.add_record_listener(records.append)
-    event = GestureEvent(GestureType.INDEX_SWIPE_DOWN, time.perf_counter_ns(), 1, Handedness.LEFT)
+    event = GestureEvent(GestureType.INDEX_SWIPE_UP, time.perf_counter_ns(), 1, Handedness.LEFT)
     guest_services.dispatcher.submit(event)
     assert wait_until(lambda: any(r.status is ActionStatus.SUCCEEDED for r in records))
     window._update_control_status()
