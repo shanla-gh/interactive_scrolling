@@ -119,6 +119,14 @@ EXPECTATIONS: dict[str, Expectation] = {
         2,
         also=((G.INDEX_SWIPE_DOWN, 2),),
     ),
+    # repeats session (Brief 009): rapid repeated and alternating swipes, any hand shape
+    "repeat_up_x3": Expectation("rapid repeat up", G.INDEX_SWIPE_UP, 3),
+    "repeat_down_x3": Expectation("rapid repeat down", G.INDEX_SWIPE_DOWN, 3),
+    "repeat_right_x3": Expectation("rapid repeat right", G.INDEX_SWIPE_RIGHT, 3),
+    "repeat_left_x3": Expectation("rapid repeat left", G.INDEX_SWIPE_LEFT, 3),
+    "repeat_up_then_down": Expectation(
+        "rapid reversal (up, then down)", G.INDEX_SWIPE_UP, 1, also=((G.INDEX_SWIPE_DOWN, 1),)
+    ),
     "eval_half_heart_x4": Expectation("half-heart", G.HALF_HEART, 4),
     "eval_stop_x3": Expectation("stop pose", G.STOP_GESTURE, 3),
     "neg_point_and_drop": Expectation("negative: pointing hand dropped / relaxed"),

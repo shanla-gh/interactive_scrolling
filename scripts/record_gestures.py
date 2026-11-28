@@ -186,6 +186,21 @@ PROMPTS_4: list[tuple[str, float, str]] = [
 # Fifth session (Brief 005, ~3 minutes per hand): the open questions only - natural downward
 # finger swipes (also right after an upward one), fist swipes in four directions and the
 # fist-specific negatives. Evaluate fist segments with --set control_style=hybrid.
+_REPEAT_BLOCK: list[tuple[str, float, str]] = [
+    ("neg_rest", 3, "Relax."),
+    ("repeat_up_x3", 7, "Three quick UP swipes in a row (next, next, next). Keep the hand up."),
+    ("neg_rest", 3, "Relax."),
+    ("repeat_down_x3", 7, "Three quick DOWN swipes in a row (back, back, back)."),
+    ("neg_rest", 3, "Relax."),
+    ("repeat_right_x3", 7, "Three quick swipes to your RIGHT in a row."),
+    ("neg_rest", 3, "Relax."),
+    ("repeat_left_x3", 7, "Three quick swipes to your LEFT in a row."),
+    ("neg_rest", 3, "Relax."),
+    ("repeat_up_then_down", 7, "UP, then right away DOWN (next, then back)."),
+]
+PROMPTS_REPEATS: list[tuple[str, float, str]] = _REPEAT_BLOCK * 3
+"""Brief 009: rapid repeated and alternating swipes (CP 46.5), for held-out evaluation."""
+
 PROMPTS_5: list[tuple[str, float, str]] = [
     ("neg_rest", 3, "Sit normally. Hands relaxed."),
     ("eval_down_x5", 14, "Move your finger DOWN the way you naturally would, 5 times."),
@@ -232,7 +247,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--output-dir", type=Path, default=Path("recordings"))
-    parser.add_argument("--session", choices=["1", "2", "3", "4", "5", "negatives"], default="5")
+    parser.add_argument(
+        "--session", choices=["1", "2", "3", "4", "5", "repeats", "negatives"], default="5"
+    )
     parser.add_argument("--hand", choices=["right", "left", "either"], default="either")
     parser.add_argument("--minutes", type=float, default=10.0, help="negatives session length")
     args = parser.parse_args()
@@ -242,6 +259,7 @@ def main() -> int:
         "3": PROMPTS_3,
         "4": PROMPTS_4,
         "5": PROMPTS_5,
+        "repeats": PROMPTS_REPEATS,
         "negatives": negatives_session(args.minutes),
     }[args.session]
     disable_power_throttling()

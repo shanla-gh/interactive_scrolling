@@ -85,6 +85,8 @@ def kind_of(label: str) -> str:
         return "rotated"
     if "sweep" in label:
         return "open hand"
+    if label.startswith("repeat_"):
+        return "repeat"
     return "finger"
 
 
