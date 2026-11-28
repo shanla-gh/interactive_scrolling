@@ -59,3 +59,18 @@ def test_intentional_reversal_is_scored_for_both_directions(tmp_path: Path) -> N
     row = result.rows["intentional reversal (up, then down)"]
     assert (row.expected, row.detected, row.false_triggers) == (4, 2, 0)
     assert not any("calib" in category for category in result.rows)
+
+
+def test_gaze_calibration_fit_recovers_a_known_mapping() -> None:
+    import numpy as np
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    import evaluate_gaze_calibration as tool
+
+    rng = np.random.default_rng(1)
+    x = rng.normal(0, 0.1, (60, 5))
+    truth = np.stack([800 + 4000 * x[:, 0] + 300 * x[:, 2], 450 + 3000 * x[:, 1]], axis=1)
+    for quadratic in (False, True):
+        coef = tool.fit(x, truth, quadratic, ridge=1e-9)
+        predicted = tool.design(x, quadratic) @ coef
+        assert np.abs(predicted - truth).max() < 1.0
