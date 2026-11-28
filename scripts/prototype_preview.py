@@ -124,6 +124,13 @@ def main() -> int:
     parser.add_argument("--seconds", type=float, default=8.0)
     parser.add_argument("--save-frames", type=Path)
     parser.add_argument("--json", type=Path)
+    parser.add_argument(
+        "--cpu-ab",
+        type=int,
+        default=0,
+        metavar="N",
+        help="only measure browser CPU: N alternating rounds of preview off / on (settled page)",
+    )
     args = parser.parse_args()
     executable = find_browser(prefer_extension_support=True)
     if executable is None:
@@ -162,6 +169,29 @@ def main() -> int:
             print(json.dumps(report, indent=2))
             return 1
         tab_id = bridge.clients()[0].context.shorts.tab_id  # type: ignore[union-attr]
+        if args.cpu_ab:
+            time.sleep(5)  # let the page settle
+            off, on = [], []
+            for _ in range(args.cpu_ab):
+                off.append(cpu_percent(browser_cpu(browser), args.seconds))
+                browser.activate(page)
+                time.sleep(0.3)
+                worker.eval(f"startPreview({tab_id})")
+                time.sleep(1.5)
+                on.append(cpu_percent(browser_cpu(browser), args.seconds))
+                report.setdefault("fps_during_on", []).append(round(bridge.preview.status().fps, 1))
+                worker.eval("stopPreview('cpu measurement')")
+                time.sleep(1.5)
+            report["browser_cpu_preview_off"] = off
+            report["browser_cpu_preview_on"] = on
+            report["browser_cpu_added_median"] = round(
+                statistics.median(on) - statistics.median(off), 1
+            )
+            report["logical_cpus"] = psutil.cpu_count()
+            print(json.dumps(report, indent=2))
+            if args.json:
+                args.json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            return 0
         report["browser_cpu_without_preview"] = cpu_percent(browser_cpu(browser), args.seconds)
         browser.activate(page)  # Edge may bring a startup tab to the front meanwhile
         time.sleep(0.5)

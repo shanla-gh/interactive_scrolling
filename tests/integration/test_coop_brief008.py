@@ -175,3 +175,13 @@ def test_unexpected_protocol_version_is_explained(pair) -> None:  # noqa: F811
         ws.recv(timeout=5)
     assert info.value.rcvd.code == s.CLOSE_VERSION
     assert "different version" in s.refusal_message(s.CLOSE_VERSION, "")
+
+
+def test_removed_guest_is_told_and_does_not_reconnect(pair) -> None:  # noqa: F811
+    host, guest, code, _browser, _hd, guest_dispatcher = pair
+    join(host, guest, code, guest_dispatcher)
+    host.remove_guest()
+    assert wait_until(lambda: not guest.connected, timeout_s=5)
+    assert "removed you" in guest.state
+    time.sleep(s.RECONNECT_INTERVAL_S + 0.5)
+    assert guest.reconnects == 0 and host.status().peer is None and host.active

@@ -64,6 +64,64 @@ class WarningCollector(logging.Handler):
         self.records.append(f"{record.levelname}: {record.getMessage()}")
 
 
+def start_preview_browser(services, port: int) -> dict:  # type: ignore[no-untyped-def]
+    """Start Edge with the extension in a thread (the UI thread must keep running) and begin
+    a live preview of real YouTube Shorts. Returns a dict filled in by the thread."""
+    import threading
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tests.browser_helpers import TAB_CAPTURE_TEST_ARGS, Browser, find_browser
+
+    box: dict = {"status": "starting"}
+
+    def run() -> None:
+        try:
+            executable = find_browser(prefer_extension_support=True)
+            with socket.socket() as s:
+                s.bind(("127.0.0.1", 0))
+                debug_port = s.getsockname()[1]
+            browser = Browser(
+                executable,
+                debug_port,
+                extension=True,
+                headless=False,
+                extra_args=TAB_CAPTURE_TEST_ARGS,
+            )
+            box["browser"] = browser
+            worker = browser.extension_worker()
+            token = services.user_settings.pairing_token
+            worker.eval(
+                f"chrome.storage.local.set({{token: '{token}', port: {port}}})"
+                ".then(() => connect())"
+            )
+            page = browser.new_tab()
+            page.call("Page.navigate", url="https://www.youtube.com/shorts")
+            time.sleep(5)
+            if "consent." in page.eval("location.host"):
+                page.eval(
+                    "[...document.querySelectorAll('button')]"
+                    ".find(b => b.innerText.trim() === 'Reject all').click()"
+                )
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                browser.activate(page)
+                clients = services.bridge.clients()
+                shorts = clients[0].context.shorts if clients and clients[0].context else None
+                if shorts is not None and shorts.video_ready:
+                    break
+                time.sleep(0.5)
+            tab_id = services.bridge.clients()[0].context.shorts.tab_id
+            browser.activate(page)
+            time.sleep(0.5)
+            box["start"] = worker.eval(f"startPreview({tab_id})")
+            box["status"] = "running"
+        except Exception as exc:  # reported in the session report
+            box["status"] = f"failed: {exc}"
+
+    threading.Thread(target=run, name="preview-browser", daemon=True).start()
+    return box
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--minutes", type=float, default=10.0)
@@ -94,13 +152,25 @@ def main() -> int:
         help="load the person-segmentation and face-landmark models and enable eye analytics",
     )
     parser.add_argument("--transparent", action="store_true", help="transparent Broadcast overlay")
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="also run a live Shorts preview: a throw-away Edge profile with the extension on "
+        "real YouTube Shorts (Chromium test switch instead of the popup click; Brief 008)",
+    )
+    parser.add_argument(
+        "--keep-timer-throttling",
+        action="store_true",
+        help="measurement only: do not opt out of Windows ignoring timer resolution while no "
+        "window is visible (the application always opts out since Brief 008)",
+    )
     args = parser.parse_args()
     mode = ControlMode(args.mode)
 
     configure_logging("WARNING")
     warnings = WarningCollector()
     logging.getLogger().addHandler(warnings)
-    throttling_disabled = disable_power_throttling()
+    throttling_disabled = disable_power_throttling(not args.keep_timer_throttling)
 
     settings = AppSettings()
     model = default_model_path()
@@ -144,6 +214,9 @@ def main() -> int:
     window.stall_monitor.context_provider = probe.describe
     window.show()
     monitor = ResourceMonitor()
+    preview_box: dict = {}
+    if args.preview:
+        preview_box = start_preview_browser(services, port)
 
     duration_s = args.minutes * 60
     start_ns = time.perf_counter_ns()
@@ -276,6 +349,20 @@ def main() -> int:
     def finish() -> None:
         sampler.stop()
         beat.stop()
+        if preview_box:
+            feed = services.bridge.preview.status()
+            report["preview"] = {
+                "status": preview_box.get("status"),
+                "start": preview_box.get("start"),
+                "frames_received": feed.frames,
+                "frames_decoded_by_window": window.preview.decoded,
+                "fps_at_end": round(feed.fps, 1),
+                "transport_ms_median": feed.transport_ms,
+                "skipped_by_browser": feed.skipped,
+            }
+            browser = preview_box.get("browser")
+            if browser is not None:
+                browser.close()
         t0 = time.perf_counter()
         window.close()
         report["shutdown_s"] = round(time.perf_counter() - t0, 3)
@@ -315,6 +402,7 @@ def main() -> int:
             "date_utc": datetime.now(UTC).isoformat(timespec="seconds"),
             "environment": environment(),
             "power_throttling_disabled": throttling_disabled,
+            "timer_resolution_opt_out": not args.keep_timer_throttling,
             "requested_minutes": args.minutes,
             "measured_seconds": samples[-1]["t"] if samples else 0,
             "capture_fps": summarize([s["capture_fps"] for s in running]),

@@ -80,9 +80,14 @@ class BroadcastSettingsDialog(QDialog):
         self._current = current_creator
         creator = current_creator()
         self.effects = effects
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 14)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 16, 18, 14)
+        columns = QHBoxLayout()
+        columns.setSpacing(28)
+        outer.addLayout(columns)
+        layout = QVBoxLayout()
         layout.setSpacing(8)
+        columns.addLayout(layout, 1)
 
         layout.addWidget(_heading("Background"))
         self.transparent = QCheckBox("Transparent background")
@@ -109,7 +114,10 @@ class BroadcastSettingsDialog(QDialog):
             layout.addWidget(box)
             self.layers[name] = box
 
-        layout.addSpacing(6)
+        layout.addStretch(1)
+        layout = QVBoxLayout()
+        layout.setSpacing(8)
+        columns.addLayout(layout, 1)
         layout.addWidget(_heading("Clown effect"))
         self.clown = QCheckBox("Progressive clown makeup (nose, lips, light white makeup)")
         self.clown.setChecked(effects.clown_enabled)
@@ -179,7 +187,8 @@ class BroadcastSettingsDialog(QDialog):
         row = QHBoxLayout()
         row.addStretch(1)
         row.addWidget(close)
-        layout.addLayout(row)
+        layout.addStretch(1)
+        outer.addLayout(row)
 
     def _set(self, **changes: object) -> None:
         # Always from the overlay's current settings: it may have been moved or resized.

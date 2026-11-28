@@ -998,8 +998,12 @@ class MainWindow(QMainWindow):
 
     def _approve_guest(self, approved: bool) -> None:
         host = getattr(self.services, "_coop_host", None)
-        if host is not None:
+        if host is None:
+            return
+        if approved or host.status().pending_approval:
             host.approve(approved)
+        else:
+            host.remove_guest()  # "Remove" for a guest who was already let in
 
     def _set_shared_control(self, enabled: bool) -> None:
         host = getattr(self.services, "_coop_host", None)

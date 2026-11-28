@@ -382,6 +382,19 @@ class CoopHost:
         if not approved:
             self._close_guest("the host did not approve")
 
+    def remove_guest(self) -> None:
+        """Disconnect the connected Guest (the session and its invitation stay open). The Guest
+        is told why and does not reconnect; it would need the Host's approval again."""
+        with self._lock:
+            guest, name = self._guest, self._guest_name
+            if name:
+                self._approved_names.discard(name)
+        if guest is None:
+            return
+        self._send({"type": "bye", "reason": "the host removed you from the session"})
+        log.info("Co-op guest %s removed", name)
+        self._close_guest("removed by the host")
+
     def set_shared_control(self, enabled: bool) -> None:
         """Immediately allow or block Guest control (the Host keeps controlling)."""
         self.shared_control = enabled
