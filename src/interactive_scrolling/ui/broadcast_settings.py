@@ -150,6 +150,14 @@ class BroadcastSettingsDialog(QDialog):
         )
         preview.addWidget(self.stage, 1)
         layout.addLayout(preview)
+        self.eye_overlay = QCheckBox("Eye and gaze overlay (estimated direction)")
+        self.eye_overlay.setChecked(effects.eye_overlay)
+        self.eye_overlay.setToolTip(
+            "Eye outlines, iris centres and an estimated gaze direction from the webcam. "
+            "Display only: it never controls anything."
+        )
+        self.eye_overlay.toggled.connect(lambda on: self._effects(eye_overlay=on))
+        layout.addWidget(self.eye_overlay)
         more = QPushButton("Stage timing and eye analytics...")
         more.setObjectName("flatButton")
         more.clicked.connect(self.face_effects_requested)

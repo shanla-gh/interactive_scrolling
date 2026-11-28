@@ -452,6 +452,8 @@ class EffectsSettings:
     clown_makeup_opacity: float = 0.35
     """Strength of the stage 3 white makeup (0.1-0.7; the face always stays visible)."""
     eye_analytics_enabled: bool = False
+    eye_overlay: bool = False
+    """Draw eye outlines, iris centres and estimated gaze vectors (Brief 009; display only)."""
     eye_baseline_yaw: float | None = None
     """Result of the optional one-point calibration (``None``: not calibrated)."""
     eye_baseline_pitch: float | None = None

@@ -87,6 +87,7 @@ from interactive_scrolling.vision.camera import CameraInfo
 from interactive_scrolling.vision.compositing import MaskCompositor
 from interactive_scrolling.visualization import palette
 from interactive_scrolling.visualization.clown import ClownEffect, clown_stage
+from interactive_scrolling.visualization.eye_overlay import EyeOverlay
 
 log = logging.getLogger(__name__)
 
@@ -194,6 +195,7 @@ class MainWindow(QMainWindow):
             )
             self.pipeline.add_frame_tap(self.face_worker.submit)
         self.clown = ClownEffect()
+        self.eyes = EyeOverlay()
         self.creator = CreatorOverlay(
             user_settings.creator, user_settings.appearance, self.segmenter
         )
@@ -207,6 +209,8 @@ class MainWindow(QMainWindow):
         self.creator.settings_requested.connect(self.open_broadcast_settings)
         self.video.extra_painters.append(self._paint_clown)
         self.creator.extra_painters.append(self._paint_clown)
+        self.video.extra_painters.append(self._paint_eyes)
+        self.creator.extra_painters.append(self._paint_eyes)
         self._update_face_worker()
         self.video.set_mirrored(settings.mirror_preview)
         self.video.renderer.trail_duration_s = settings.motion.trail_duration_s
@@ -446,6 +450,11 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _=False, s=slot: s())
             menu.addAction(action)
         menu.addSeparator()
+        self.eye_overlay_action = QAction("Show eye and gaze overlay (estimate)", menu)
+        self.eye_overlay_action.setCheckable(True)
+        self.eye_overlay_action.setChecked(self.services.user_settings.effects.eye_overlay)
+        self.eye_overlay_action.toggled.connect(self.set_eye_overlay)
+        menu.addAction(self.eye_overlay_action)
         self.now_playing_action = QAction("Show Now playing", menu)
         self.now_playing_action.setCheckable(True)
         self.now_playing_action.toggled.connect(lambda on: self._set_now_playing(on))
@@ -645,6 +654,11 @@ class MainWindow(QMainWindow):
     def _apply_effects(self, effects) -> None:  # type: ignore[no-untyped-def]
         self.services.apply_effects(effects)
         self._update_face_worker()
+        action = getattr(self, "eye_overlay_action", None)
+        if action is not None and action.isChecked() != effects.eye_overlay:
+            action.blockSignals(True)
+            action.setChecked(effects.eye_overlay)
+            action.blockSignals(False)
         if effects.clown_preview_stage is not None:
             self.clown.jump_to_stage(effects.clown_preview_stage)
 
@@ -875,7 +889,11 @@ class MainWindow(QMainWindow):
     def _update_face_worker(self) -> None:
         effects = self.services.user_settings.effects
         if self.face_worker is not None:
-            self.face_worker.set_enabled(effects.clown_enabled or effects.eye_analytics_enabled)
+            self.face_worker.set_enabled(
+                effects.clown_enabled or effects.eye_analytics_enabled or effects.eye_overlay
+            )
+        if not effects.eye_overlay:
+            self.eyes.reset()
         self.clown.set_makeup_opacity(effects.clown_makeup_opacity)
         if not effects.clown_enabled:
             self.clown.reset()
@@ -887,7 +905,8 @@ class MainWindow(QMainWindow):
         return clown_stage(self.services.current_session_s(), effects.clown_thresholds)
 
     def _update_clown(self, frame) -> None:  # type: ignore[no-untyped-def]
-        if not self.services.user_settings.effects.clown_enabled or self.face_worker is None:
+        effects = self.services.user_settings.effects
+        if self.face_worker is None or not (effects.clown_enabled or effects.eye_overlay):
             return
         result = self.face_worker.latest()
         face = None
@@ -895,9 +914,24 @@ class MainWindow(QMainWindow):
             result.timestamp_ns, result.session, frame.capture_ns, frame.session
         ):
             face = result.value
+        if effects.eye_overlay:
+            self.eyes.update(face, frame.capture_ns)
+        if not effects.clown_enabled:
+            return
         self.clown.update(
             face.landmarks if face is not None else None, frame.capture_ns, self.clown_stage()
         )
+
+    def _paint_eyes(self, painter, transform, frame) -> None:  # type: ignore[no-untyped-def]
+        if self.services.user_settings.effects.eye_overlay:
+            self.eyes.paint(painter, transform)
+
+    def set_eye_overlay(self, enabled: bool) -> None:
+        effects = self.services.user_settings.effects
+        if effects.eye_overlay != enabled:
+            self._apply_effects(replace(effects, eye_overlay=enabled))
+        if self.eye_overlay_action.isChecked() != enabled:
+            self.eye_overlay_action.setChecked(enabled)
 
     def _paint_clown(self, painter, transform, frame) -> None:  # type: ignore[no-untyped-def]
         if self.services.user_settings.effects.clown_enabled:
