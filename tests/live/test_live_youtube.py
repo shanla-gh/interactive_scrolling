@@ -33,6 +33,42 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+DIAGNOSTICS = """JSON.stringify({
+  path: location.pathname + location.search,
+  visibility: document.visibilityState,
+  focused: document.hasFocus(),
+  reels: document.querySelectorAll("ytd-reel-video-renderer").length,
+  active: document.querySelectorAll("ytd-reel-video-renderer[is-active]").length,
+  dialogs: [...document.querySelectorAll("[role=dialog], tp-yt-paper-dialog")]
+    .filter(e => e.getClientRects().length && (e.innerText || "").trim())
+    .map(e => (e.innerText || "").trim().slice(0, 80)).slice(0, 3),
+  down: (() => { const h = document.querySelector("#navigation-button-down");
+    const b = h && h.querySelector("button");
+    return b ? {disabled: b.disabled, aria: b.getAttribute("aria-disabled"),
+      hidden: h.getAttribute("aria-hidden"), vis: getComputedStyle(h).visibility} : null; })(),
+  video: (() => { const v = document.querySelector("ytd-reel-video-renderer[is-active] video")
+    || document.querySelector("#shorts-player video");
+    return v ? {ready: v.readyState, paused: v.paused, t: Math.round(v.currentTime * 10) / 10}
+      : null; })(),
+})"""
+
+
+def diagnose(page, action: ActionType) -> None:  # type: ignore[no-untyped-def]
+    """On a failed navigation: page state now and after a further second, plus a screenshot
+    (kept locally in reports/, never committed)."""
+    import base64
+    from pathlib import Path
+
+    print(f"DIAGNOSTICS {action.value} now: {page.eval(DIAGNOSTICS)}")
+    time.sleep(1.0)
+    print(f"DIAGNOSTICS {action.value} +1 s: {page.eval(DIAGNOSTICS)}")
+    shot = page.call("Page.captureScreenshot", format="png")
+    out = Path("reports") / f"live_failure_{action.value}_{int(time.time())}.png"
+    out.parent.mkdir(exist_ok=True)
+    out.write_bytes(base64.b64decode(shot["data"]))
+    print(f"DIAGNOSTICS screenshot {out}")
+
+
 def test_real_youtube_shorts_end_to_end() -> None:
     executable = find_browser(prefer_extension_support=True)
     # Headless Edge sometimes never loads YouTube's video (observed Nov 2026); the controller
@@ -59,12 +95,19 @@ def test_real_youtube_shorts_end_to_end() -> None:
             )
 
         def shorts_in_front() -> bool:
-            # Edge may open its own startup tabs on top of ours; keep the Shorts tab in front
-            # the way a user would. Sign-in status is known once the masthead has rendered.
+            # A fresh Edge profile opens its own first-run tabs and may bring them to the front
+            # at any time, even in the middle of an action (Brief 008 diagnostics: the Shorts
+            # page was "hidden" when a navigation failed). A real user's browser does not do
+            # that: close every other tab and keep the Shorts tab in front. After the consent
+            # page YouTube lands on /shorts?cbrd=1 (no video id yet), so match /shorts too.
             worker.eval(
-                "chrome.tabs.query({}).then(ts => ts.filter(t => (t.url || '').startsWith("
-                "'https://www.youtube.com/shorts/'))).then(ts => ts.length && !ts[0].active && "
-                "chrome.tabs.update(ts[0].id, {active: true}))"
+                "chrome.tabs.query({}).then(ts => {"
+                " const shorts = ts.filter(t => (t.url || '').startsWith("
+                "'https://www.youtube.com/shorts'));"
+                " if (!shorts.length) return;"
+                " const others = ts.filter(t => !shorts.includes(t)).map(t => t.id);"
+                " if (others.length) chrome.tabs.remove(others);"
+                " if (!shorts[0].active) chrome.tabs.update(shorts[0].id, {active: true}); })"
             )
             status = controller.status()
             return status.ready and status.signed_in is not None
@@ -96,6 +139,8 @@ def test_real_youtube_shorts_end_to_end() -> None:
                 f"{action.value}: {result.status.value} {result.reason} {result.detail} "
                 f"({(time.perf_counter() - started) * 1000:.0f} ms)"
             )
+            if result.status is not ActionStatus.SUCCEEDED and action is not ActionType.LIKE_SHORT:
+                diagnose(page, action)
             return result
 
         first_id = page.eval("location.pathname")
