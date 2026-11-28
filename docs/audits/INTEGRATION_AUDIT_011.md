@@ -6,7 +6,7 @@ line and the new tools. The UI layout is unchanged.
 
 | Verdict | |
 |---|---|
-| Technical verification | **passed with one open intermittent failure**: 773 tests passed, 0 failed, 6 skipped (webcam/live, run separately) in 2 of 3 final full runs; the third had 1 failure (`test_tab_navigation_leaves_and_returns_to_shorts`, browser fixture) that 13 further runs of the browser tests did not reproduce (cause unknown; an attempted fix that closed foreign tabs broke other tests and was reverted); hardware 5/5; packaged 0.9.0b1 self-test PASS; ruff clean |
+| Technical verification | **passed with one open intermittent failure**: 773 tests passed, 0 failed, 6 skipped (webcam/live, run separately) in 2 of 3 final full runs; the third had 1 failure (`test_tab_navigation_leaves_and_returns_to_shorts`, browser fixture) that 13 further runs did not reproduce; CI then failed once in the same module ('no next Short available'); probable cause, fixed in 4c39040: the shared-browser helper accepted a stale report from the previous test's page (an earlier attempted fix that closed foreign tabs broke other tests and was reverted); hardware 5/5; packaged 0.9.0b1 self-test PASS; ruff clean |
 | Recognition | gate: no regression in all five frozen configurations; mode consistency identical in 4 window configurations and 9 replay scenarios |
 | Real YouTube | not re-run in this brief (no browser-path change); Brief 008: 19 of 20 |
 | Not verified | Broadcast feel with a real person, gaze accuracy, recognition on independent data, two computers, higher camera frame rates (hardware limited to 30 fps) |
@@ -64,5 +64,5 @@ line and the new tools. The UI layout is unchanged.
 | Medium | Gaze estimate accuracy unknown; no calibration data |
 | Medium | Rare UI stalls unexplained |
 | Medium | Camera delivers bursts; recognition still uses arrival times |
-| Low | Intermittent browser fixture failure (tab navigation), about 1 in 10 full runs, cause unknown |
+| Low | Intermittent browser fixture failure: probable cause (stale context in a test helper) fixed in 4c39040, CI green; watch for recurrence |
 | Medium | Stalls during the 30-minute live-preview session (likely the in-process test harness; not excluded for long sessions) |

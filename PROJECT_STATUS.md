@@ -134,11 +134,11 @@ Details: [Brief 005 report](docs/milestones/BRIEF_005_REPORT.md),
 | Command | Result |
 |---|---|
 | `ruff format --check` / `ruff check` | clean |
-| `pytest` | 773 passed, 0 failed, 6 skipped in 2 of 3 final runs; 1 intermittent browser fixture failure in the third (not reproduced in 13 runs) |
+| `pytest` | 773 passed, 0 failed, 6 skipped in 2 of 3 final runs; 1 intermittent browser fixture failure in the third; probable cause (stale context in a test helper) fixed in 4c39040 |
 | `pytest tests/hardware --hardware` | 5 passed |
 | Gesture regression gate | no regression in all five 0.6.0b1 configurations |
 | Packaged build `--self-test` | PASS (0.9.0b1) |
-| GitHub Actions | checked after the last push |
+| GitHub Actions | 6da4610 failed (same intermittent test); 4c39040 green |
 
 ## Performance (see docs/benchmarks/PERFORMANCE_009.md)
 
@@ -164,7 +164,7 @@ features (OBS, co-op on two PCs, packaging on a second PC).
 | Medium | False positives unchanged (11 / 249 s any shape, 6 finger only); rapid repeats unmeasured |
 | Medium | Stalls during a 30-minute live-preview session (likely the test harness, not excluded); rare UI stalls |
 | Medium | Camera limited to 30 fps; recognition on arrival times (driver times recorded) |
-| Low | Intermittent browser fixture test (about 1 in 10 runs); packaged build unsigned |
+| Low | Intermittent browser fixture test (probable cause fixed in 4c39040); packaged build unsigned |
 
 ## Commits for Engineering Brief 009
 
