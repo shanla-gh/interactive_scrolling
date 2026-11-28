@@ -26,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -83,6 +83,10 @@ OUTCOME_TEXT = {
     ActionStatus.UNKNOWN: ("Unknown outcome", palette.ACCENT_RED),
     ActionStatus.NOT_EXECUTED: ("Not executed", palette.TEXT_MUTED),
 }
+
+
+FADE_REPAINT_MS = 40
+"""Repaint interval while feedback fades without new camera frames."""
 
 
 def _no_activate(widget: QWidget) -> None:
@@ -411,6 +415,17 @@ class CreatorOverlay(QWidget):
         self.transparent_state = "active"
         return QImage(rgba.data, w, h, rgba.strides[0], QImage.Format.Format_RGBA8888)
 
+    _fade_pending = False
+
+    def _schedule_fade(self) -> None:
+        if not self._fade_pending:
+            self._fade_pending = True
+            QTimer.singleShot(FADE_REPAINT_MS, self._fade_tick)
+
+    def _fade_tick(self) -> None:
+        self._fade_pending = False
+        self.update()
+
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -492,7 +507,9 @@ class CreatorOverlay(QWidget):
             if s.show_outcome and status is not None:
                 text, color = OUTCOME_TEXT.get(status, (status.value, palette.TEXT_MUTED))
                 lines.append((text, color))
-            self.update()  # fade out even without new frames
+            # Keep fading even if frames stop, at a bounded rate (Brief 009: calling update()
+            # from paintEvent repainted the overlay 73 times a second during feedback).
+            self._schedule_fade()
         if s.show_counters and self.counters_text:
             lines.append((self.counters_text, palette.TEXT_MUTED))
         if not lines:

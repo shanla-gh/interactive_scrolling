@@ -6,7 +6,7 @@ import contextlib
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -18,6 +18,9 @@ from interactive_scrolling.ui.theme import UI_FONT_FAMILIES, mono_font
 from interactive_scrolling.visualization import palette
 from interactive_scrolling.visualization.geometry import ViewTransform
 from interactive_scrolling.visualization.overlay import OverlayRenderer
+
+FADE_REPAINT_MS = 40
+"""Repaint interval while feedback fades without new camera frames."""
 
 
 def _no_section(name: str) -> AbstractContextManager[None]:
@@ -126,6 +129,17 @@ class VideoView(QWidget):
         return QSize(960, 540)
 
     # ------------------------------------------------------------------ painting
+
+    _fade_pending = False
+
+    def _schedule_fade(self) -> None:
+        if not self._fade_pending:
+            self._fade_pending = True
+            QTimer.singleShot(FADE_REPAINT_MS, self._fade_tick)
+
+    def _fade_tick(self) -> None:
+        self._fade_pending = False
+        self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         with self.section("video paint"):
@@ -324,7 +338,9 @@ class VideoView(QWidget):
                 painter.drawRoundedRect(box, 8, 8)
                 painter.setPen(accent)
                 painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
-                self.update()  # keep fading even if frames stop
+                # Keep fading even if frames stop, at a bounded rate (Brief 009: calling update()
+                # from paintEvent repainted the overlay 73 times a second during feedback).
+                self._schedule_fade()
         painter.restore()
 
     def _paint_hud(self, painter: QPainter, t: ViewTransform, frame: ProcessedFrame) -> None:
