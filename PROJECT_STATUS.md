@@ -4,10 +4,29 @@ Source of truth for the current state of the project. Update it with every check
 
 | | |
 |---|---|
-| Version | 0.7.0b1 - beta, **not released** (no tag) |
-| Active work | Engineering Brief 007 (product experience, Broadcast Mode) implemented; **Director validation pending** |
-| Engineering decision | PARTIALLY READY - SPECIFIC VISUAL OR PHYSICAL VERIFICATION REQUIRED |
-| Last updated | 2026-11-27 |
+| Version | 0.8.0b1 - beta, **not released** (no tag) |
+| Active work | Engineering Brief 008 (product redesign, live Shorts preview, Doomscroll Together) implemented; **Director validation pending** |
+| Engineering decision | PARTIALLY READY - SPECIFIC PREVIEW, VISUAL OR TWO-DEVICE VERIFICATION REQUIRED |
+| Last updated | 2026-11-28 |
+
+## Brief 008 in one paragraph
+
+Normal Mode replaces the developer dashboard: a minimal top bar, the camera with a compact
+Off/Test/Live strip next to **Now playing** - the Short from the user's browser, live in the
+app through the extension's tab capture (one chosen tab, video area only, loopback, no
+sound; gestures reach that tab while the app is in front) - and Browser, **Doomscroll
+Together** and Today on the right, with a collapsible diagnostics console at the bottom.
+Doomscroll Together gained host/join dialogs, invitations, private-network-only listening,
+expiring codes, plain-language errors, reconnection and rate limiting. Broadcast settings make
+the transparent background one click away; the clown effect is now makeup (nose, lips,
+translucent white) instead of a mask and wig. Real-YouTube failures from Brief 007 were traced
+to the test harness, and the Background Mode drop rate was re-measured (0.2/min with a new
+Windows timer opt-out). The gesture engine is unchanged (gate: no regression). Open: two
+computers, a real person for clown/transparency, the live preview and audio by the Director.
+Details: [Brief 008 report](docs/milestones/BRIEF_008_REPORT.md),
+[Audit 010](docs/audits/INTEGRATION_AUDIT_010.md),
+[performance](docs/benchmarks/PERFORMANCE_008.md),
+[validation](docs/milestones/BRIEF_008_VALIDATION.md).
 
 ## Brief 007 in one paragraph
 
@@ -76,6 +95,8 @@ Details: [Brief 005 report](docs/milestones/BRIEF_005_REPORT.md),
 | Integration Audit 008 | technical PASS; not a full pass | [Audit 008](docs/audits/INTEGRATION_AUDIT_008.md) |
 | Brief 007 product experience (M26-M34) | implemented; technical pass; visual and creator checks need the Director | [Brief 007 report](docs/milestones/BRIEF_007_REPORT.md) |
 | Integration Audit 009 | technical PASS; not a full pass | [Audit 009](docs/audits/INTEGRATION_AUDIT_009.md) |
+| Brief 008 product redesign (M35-M44) | implemented; technical pass; preview, visual and two-computer checks need the Director | [Brief 008 report](docs/milestones/BRIEF_008_REPORT.md) |
+| Integration Audit 010 | technical PASS; not a full pass | [Audit 010](docs/audits/INTEGRATION_AUDIT_010.md) |
 
 ## Recognition results (development data from one person; all four real recordings)
 
@@ -89,32 +110,33 @@ Details: [Brief 005 report](docs/milestones/BRIEF_005_REPORT.md),
 | 15 fps / 10 % frame loss (synthetic) | finger up 4/8 (3 wrong) / 6/8 (2 wrong) | missed flicks let their return through |
 | Half-heart, stop | unchanged from 0.5 | |
 
-## Test results (2026-11-27, Brief 007)
+## Test results (2026-11-28, Brief 008)
 
 | Command | Result |
 |---|---|
 | `ruff format --check` / `ruff check` | clean |
-| `pytest` | 699 passed, 0 failed, 0 expected failures, 6 skipped (webcam and live tests, run separately) - Brief 006 end 686 |
-| Repeated full runs | 3 consecutive runs on the final code: all 699 passed |
+| `pytest` | 755 passed, 0 failed, 0 expected failures, 6 skipped (webcam and live tests, run separately) - Brief 007 end 699 |
+| Repeated full runs | 3 consecutive runs on the final code: all 755 passed |
 | `pytest tests/hardware --hardware` | 5 passed |
-| `pytest tests/live --live-youtube` | 7 of 11 runs passed; the 4 failures are a YouTube-side change (consent redirect / Short not advancing in a fresh profile) that the approved 0.6.0b1 code shows too (1 of 3) |
-| Gesture regression gate | no regression against all five 0.6.0b1 baselines |
-| Packaged build `--self-test` | PASS (0.7.0b1) |
-| GitHub Actions | see the commit list; checked after the last push |
+| `pytest tests/live --live-youtube` | 19 of 20 runs passed after the harness fix (25 of 30 before); see Audit 010 |
+| Gesture regression gate | no regression in all five 0.6.0b1 configurations |
+| Packaged build `--self-test` | PASS (0.8.0b1) |
+| GitHub Actions | checked after the last push |
 
-## Performance (development machine, 1280x720; see docs/benchmarks/PERFORMANCE_007.md)
+## Performance (development machine, 1280x720; see docs/benchmarks/PERFORMANCE_008.md)
 
-| Run (automated) | fps capture/processing | Latency | CPU | Memory |
+| Run (automated) | fps capture/processing | Latency | App CPU | Memory |
 |---|---|---|---|---|
-| Developer, 30 min, hand in view 56 % | 30.1 / 30.1 | 15.3 ms | 4.6 % | 389 -> 367 MB |
-| Broadcast + transparency + face/eye models, 10 min | 30.9 / 29.7 | 12.0 ms | 4.6 % | 440 -> 430 MB |
-| Background, 5 min | 30.8 / 29.6 | 11.9 ms | 2.7 % | 387 -> 342 MB |
-| Mode cycling every 20 s, 10 min (29 transitions, 0 violations) | 30.9 / 29.7 | 12.2 ms | 3.8 % | 426 -> 420 MB |
+| Normal, webcam only, 4 min | 30.1 / 30.0 | 15.4 ms | 4.5 % | 385 -> 405 MB |
+| Normal + live preview (real YouTube), 3 min | 30.2 / 30.2 | 18.5 ms | 4.6 % (+1.7 % in the browser) | 395 -> 408 MB |
+| Broadcast + transparency + face/eye models, 3 min | 30.1 / 30.1 | 13.8 ms | 4.9 % | 431 -> 420 MB |
+| Combined (preview + models), 3 min | 30.1 / 30.1 | 19.6 ms | 6.4 % | 434 -> 440 MB |
+| Background, 2 x 4 min | 30.1 / 30.0 | 15.5-16.7 ms | 3.7-3.9 % | 386 -> 388-401 MB |
 
 ## Director validation
 
 Nothing in Briefs 002-004 has been verified by the Director yet (M1 was). Start with
-[BRIEF_007_VALIDATION.md](docs/milestones/BRIEF_007_VALIDATION.md) (about 20 minutes); the older
+[BRIEF_008_VALIDATION.md](docs/milestones/BRIEF_008_VALIDATION.md) (about 30 minutes, plus a session with a friend); the older
 [checklist](docs/milestones/DIRECTOR_ACCEPTANCE_CHECKLIST.md) covers the remaining Brief 003
 features (OBS, co-op on two PCs, packaging on a second PC).
 
@@ -122,12 +144,27 @@ features (OBS, co-op on two PCs, packaging on a second PC).
 
 | Severity | Issue |
 |---|---|
-| High (verification) | No human check yet of the new UI, Broadcast presentation or transparency with a real person; gesture data from one person |
-| Medium | Real YouTube navigation fails intermittently in fresh browser profiles (YouTube-side; reported as failed) |
-| Medium | About 3 % of frames dropped while the main window is hidden (cause unknown) |
-| Medium | OBS Window Capture (Windows Graphics Capture) unverified; BitBlt window capture shows black; second monitor untested; Chrome manual only |
+| High (verification) | Doomscroll Together not tested on two computers; no real-person check of clown makeup, transparency or the new UI; gesture data from one person |
+| Medium | Live preview: popup click needed per session; extension reload after updating; Chrome and audio-by-ear unchecked |
+| Medium | One undiagnosed first-navigation failure in 20 live YouTube runs |
+| Medium | UI stalls 110-180 ms on window resize in the new layout; one unexplained 393 ms stall; rare Qt stalls not resolved |
+| Medium | OBS Windows Graphics Capture unverified; second monitor untested |
 | Medium | Any hand shape: about twice the accidental swipes of pointing finger only; low-fps flick returns |
-| Low | Rare Qt stalls (344 ms once in 30 min); packaged build unsigned |
+| Low | Together messages authenticated, not encrypted (VPN encrypts); packaged build unsigned |
+
+## Commits for Engineering Brief 008
+
+```
+0d38e19 feat(browser): live Shorts preview through tab capture, with preview-tab control
+5b44f5b feat(coop): private networks only, expiring invitations, plain-language refusals, reconnect
+8900261 feat(ui): Normal Mode redesign with Now playing, Doomscroll Together, Broadcast settings and natural clown makeup
+e0a3873 feat(clown): feather the white makeup towards eyes, brows and lips; preview and live tools
+0ad7ab6 docs(coop): Doomscroll Together user guide, security and trust assumptions; overhead benchmark
+48df125 test(live): close Edge first-run tabs and accept the post-consent /shorts URL; record failures
+b2a97bd fix: background timer opt-out, a real 'Remove' for Doomscroll Together guests, Broadcast settings fits 150 %
+026d08d docs: Brief 008 architecture, guides, performance and validation; version 0.8.0b1
+(plus the commit with this status update)
+```
 
 ## Commits for Engineering Brief 007
 
@@ -191,7 +228,7 @@ Followed by the audit/status documentation commit.
 
 ## Recommended next steps
 
-1. Director: [BRIEF_007_VALIDATION.md](docs/milestones/BRIEF_007_VALIDATION.md) (and answer or
-   cancel the open Windows Firewall prompt for OBS Studio, if still shown).
-2. A recording with OBS using Broadcast Mode and the transparent background with a real person.
+1. Director: [BRIEF_008_VALIDATION.md](docs/milestones/BRIEF_008_VALIDATION.md) - reload the
+   extension, try the live preview, the clown strength, Broadcast settings.
+2. A Doomscroll Together session with a friend on the same Wi-Fi (and optionally over Tailscale).
 3. A held-out gesture recording with each hand (all existing ones were used for development).

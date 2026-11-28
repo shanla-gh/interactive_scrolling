@@ -37,7 +37,7 @@ live Short), `clown\` (synthetic face), `window_capture\`, `preview_proto\`.
 | 42.2 Segmentation behaviour | COMPLETED | privacy fallback unchanged |
 | 42.3 Combined creator experience | COMPLETED (technical) | independent options test; models only when needed (unchanged scheduling) |
 | 43.1 Live YouTube failures | COMPLETED | cause found: test harness (Edge first-run tabs, consent URL variant); test fixed |
-| 43.2 Background frame drops | see PERFORMANCE_008.md | |
-| 43.3 UI responsiveness | see PERFORMANCE_008.md | |
-| 43.4 Performance | see PERFORMANCE_008.md | |
+| 43.2 Background frame drops | COMPLETED | 2x2 alternating runs: 1.0-1.5 -> 0.2 dropped/min with the timer opt-out; Brief 007's 53.5/min did not reproduce |
+| 43.3 UI responsiveness | IN_PROGRESS - not resolved | stalls attributed: script artifacts, startup, 110-180 ms on window resize (new layout), one unexplained 393 ms |
+| 43.4 Performance | COMPLETED (measured) | PERFORMANCE_008.md: webcam, +preview, +models, Broadcast, Background, combined, Co-op (loopback), browser CPU A/B |
 | 44 Gesture protection | COMPLETED | engine untouched; gate no regression x5 (start and end) |
