@@ -51,7 +51,7 @@ def start(qtbot, window: MainWindow) -> None:
 
 def test_initial_state(qtbot) -> None:
     window = make_window(qtbot)
-    assert window.status_pill.text() == "CAMERA OFF"
+    assert window.status_pill.text() == "●  Camera off"
     assert window.start_button.text() == "Start camera"
     assert window.video.frame is None
     assert window.resolution_combo.currentText() == "640x480"
@@ -61,7 +61,7 @@ def test_initial_state(qtbot) -> None:
 def test_live_frames_update_view_and_panels(qtbot) -> None:
     window = make_window(qtbot)
     start(qtbot, window)
-    assert window.status_pill.text() == "● CAMERA ON"
+    assert window.status_pill.text() == "●  Camera on"
     assert window.start_button.text() == "Stop camera"
     assert not window.camera_combo.isEnabled() and not window.resolution_combo.isEnabled()
     qtbot.waitUntil(lambda: window.tracking_panel.hands.text() == "1", timeout=3000)
@@ -95,7 +95,7 @@ def test_stop_clears_view_and_releases_camera(qtbot) -> None:
     start(qtbot, window)
     qtbot.mouseClick(window.start_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window.pipeline.camera_state is CameraState.STOPPED, timeout=5000)
-    qtbot.waitUntil(lambda: window.status_pill.text() == "CAMERA OFF", timeout=2000)
+    qtbot.waitUntil(lambda: window.status_pill.text() == "●  Camera off", timeout=2000)
     assert window.video.frame is None
     assert window.tracking_panel.state.text() == "Inactive"
     assert SyntheticCamera.instances[-1].close_calls == 1
@@ -109,7 +109,7 @@ def test_repeated_start_stop_from_ui(qtbot) -> None:
     for _ in range(5):
         start(qtbot, window)
         qtbot.mouseClick(window.start_button, Qt.MouseButton.LeftButton)
-        qtbot.waitUntil(lambda: window.status_pill.text() == "CAMERA OFF", timeout=5000)
+        qtbot.waitUntil(lambda: window.status_pill.text() == "●  Camera off", timeout=5000)
     assert len(SyntheticCamera.instances) == 5
     assert all(c.close_calls == 1 for c in SyntheticCamera.instances)
 
@@ -117,7 +117,7 @@ def test_repeated_start_stop_from_ui(qtbot) -> None:
 def test_camera_error_is_shown_and_recoverable(qtbot) -> None:
     window = make_window(qtbot, fail_open=True)
     qtbot.mouseClick(window.start_button, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: window.status_pill.text() == "CAMERA ERROR", timeout=5000)
+    qtbot.waitUntil(lambda: window.status_pill.text() == "●  Camera error", timeout=5000)
     assert window.start_button.isEnabled() and window.start_button.text() == "Start camera"
     assert window.camera_combo.isEnabled()
     qtbot.waitUntil(

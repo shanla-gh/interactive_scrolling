@@ -7,14 +7,14 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from interactive_scrolling.config.settings import AppearanceSettings, OverlaySettings
 from interactive_scrolling.core.pipeline import ProcessedFrame
 from interactive_scrolling.core.timing import RateMeter, now_ns
 from interactive_scrolling.gestures.explain import state_label
-from interactive_scrolling.ui.theme import mono_font
+from interactive_scrolling.ui.theme import UI_FONT_FAMILIES, mono_font
 from interactive_scrolling.visualization import palette
 from interactive_scrolling.visualization.geometry import ViewTransform
 from interactive_scrolling.visualization.overlay import OverlayRenderer
@@ -50,6 +50,23 @@ class VideoView(QWidget):
         self._placeholder_font = mono_font(10.5)
         self.section: Callable[[str], AbstractContextManager[None]] = _no_section
         """Timing hook for paint events (the window sets it to ``StallMonitor.section``)."""
+        self.minimal = False
+        """Normal Mode style (Brief 008): skeleton, motion arrow, hints and gesture banners,
+        without corner brackets, grid, monospace status chips or recognizer internals."""
+
+    def set_minimal(self, minimal: bool) -> None:
+        self.minimal = minimal
+        if minimal:
+            ui = QFont()
+            ui.setFamilies(UI_FONT_FAMILIES)
+            ui.setPointSizeF(13)
+            ui.setWeight(QFont.Weight.DemiBold)
+            self._banner_font = ui
+            placeholder = QFont()
+            placeholder.setFamilies(UI_FONT_FAMILIES)
+            placeholder.setPointSizeF(10.5)
+            self._placeholder_font = placeholder
+        self.update()
 
     # ------------------------------------------------------------------ state
 
@@ -127,7 +144,9 @@ class VideoView(QWidget):
             self.renderer.paint(
                 painter, transform, self._frame.tracking, self._frame.motion, self.overlay
             )
-            if self.appearance.show_telemetry:
+            if self.minimal:
+                self._paint_status_only(painter, transform)
+            elif self.appearance.show_telemetry:
                 self._paint_hud(painter, transform, self._frame)
             if self.appearance.show_gesture_feedback:
                 self._paint_gesture_feedback(painter, transform, self._frame)
@@ -144,7 +163,33 @@ class VideoView(QWidget):
             painter.drawImage(QRectF(t.x, t.y, t.width, t.height), image)
         painter.restore()
 
+    def _paint_status_only(self, painter: QPainter, t: ViewTransform) -> None:
+        """Minimal style: only a problem state (e.g. tracking unavailable) is written on the
+        image."""
+        if not self._status_text:
+            return
+        painter.save()
+        painter.setFont(self._hud_font)
+        self._paint_chip(
+            painter,
+            QPointF(t.x + 14, t.y + 14),
+            self._status_text,
+            palette.ACCENT_AMBER,
+        )
+        painter.restore()
+
     def _paint_placeholder(self, painter: QPainter) -> None:
+        if self.minimal:
+            painter.save()
+            painter.setFont(self._placeholder_font)
+            painter.setPen(QColor(palette.TEXT_MUTED))
+            painter.drawText(
+                QRectF(self.rect()).adjusted(40, 40, -40, -40),
+                Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                self._placeholder,
+            )
+            painter.restore()
+            return
         painter.save()
         grid = QColor(palette.BORDER)
         grid.setAlpha(90)
@@ -203,6 +248,8 @@ class VideoView(QWidget):
         painter.drawLine(QPointF(sx, sy), QPointF(cx, cy))
         painter.setBrush(color)
         painter.drawEllipse(QPointF(cx, cy), 5, 5)
+        if self.minimal:
+            return
         painter.setFont(self._hud_font)
         name = motion.gesture.label.replace("SWIPE ", "")
         text = (
@@ -221,7 +268,7 @@ class VideoView(QWidget):
         gestures = frame.gestures
         if self.show_state and gestures is not None:
             painter.setFont(self._hud_font)
-            state = state_label(gestures)
+            state = "" if self.minimal else state_label(gestures)
             if state:
                 painter.setPen(QColor(palette.ACCENT_CYAN))
                 painter.drawText(

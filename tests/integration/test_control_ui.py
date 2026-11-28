@@ -209,4 +209,5 @@ def test_daily_statistics_reflect_real_events(qtbot, tmp_path) -> None:
 def test_youtube_panel_without_controller(qtbot, tmp_path) -> None:
     window, _ = make_window(qtbot, tmp_path)
     window._update_control_status()
-    assert "not available" in window.control_bar.youtube_chip.text()
+    # Brief 008: the browser state moved from the control bar to the session panel.
+    assert "not available" in window.session_panel.browser.headline.text()

@@ -6,7 +6,7 @@ from datetime import datetime
 
 import numpy as np
 import pytest
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter
 
 from interactive_scrolling.config.settings import ConfigError, EffectsSettings
 from interactive_scrolling.storage.analytics import AnalyticsStore
@@ -238,3 +238,90 @@ def test_effect_disappears_when_the_face_is_lost(qtbot) -> None:
     feed(effect, 3, 1.5, with_face=False, start=7.0)
     assert not effect.visible
     assert render(effect).pixelColor(320, 225).alpha() == 0
+
+
+# ---------------------------------------------------------------------- clown makeup (Brief 008)
+
+
+def geometric_face() -> np.ndarray:
+    """Face outline, eyes, eyebrows and lips on ellipses (normalized image coordinates)."""
+    from interactive_scrolling.visualization import clown
+
+    pts = np.zeros((478, 3), dtype=np.float32)
+    pts[:, :2] = (0.5, 0.45)
+
+    def ring(indices, cx, cy, rx, ry):  # type: ignore[no-untyped-def]
+        for k, index in enumerate(indices):
+            t = -np.pi / 2 + 2 * np.pi * k / len(indices)
+            pts[index, :2] = (cx + rx * np.cos(t), cy + ry * np.sin(t))
+
+    ring(clown.FACE_OVAL, 0.5, 0.45, 0.14, 0.2)
+    ring(clown.RIGHT_EYE, 0.43, 0.40, 0.03, 0.012)
+    ring(clown.LEFT_EYE, 0.57, 0.40, 0.03, 0.012)
+    ring(clown.RIGHT_BROW, 0.43, 0.36, 0.035, 0.008)
+    ring(clown.LEFT_BROW, 0.57, 0.36, 0.035, 0.008)
+    ring(clown.LIPS_OUTER, 0.5, 0.56, 0.05, 0.02)
+    ring(clown.LIPS_INNER, 0.5, 0.56, 0.035, 0.004)
+    pts[NOSE_TIP, :2] = (0.5, 0.47)
+    pts[FACE_RIGHT, :2] = (0.36, 0.45)
+    pts[FACE_LEFT, :2] = (0.64, 0.45)
+    return pts
+
+
+def render_on_gray(effect: ClownEffect, gray: int = 120, stripes: bool = False) -> QImage:
+    image = QImage(640, 480, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor(gray, gray, gray))
+    painter = QPainter(image)
+    if stripes:  # skin texture stand-in: alternating vertical lines
+        for x in range(0, 640, 2):
+            painter.setPen(QColor(gray + 40, gray + 40, gray + 40))
+            painter.drawLine(x, 0, x, 479)
+    effect.paint(painter, ViewTransform.fit(640, 480, 640, 480, False))
+    painter.end()
+    return image
+
+
+def staged(stage: int, opacity: float | None = None) -> ClownEffect:
+    effect = ClownEffect()
+    if opacity is not None:
+        effect.set_makeup_opacity(opacity)
+    landmarks = geometric_face()
+    for i in range(6 * 30):
+        effect.update(landmarks, int((1 + i / 30) * 1e9), stage)
+    return effect
+
+
+def at(image: QImage, x: float, y: float) -> QColor:
+    return image.pixelColor(int(x * 640), int(y * 480))
+
+
+def test_full_makeup_is_translucent_and_spares_eyes_brows_lips_and_hair(qtbot) -> None:
+    image = render_on_gray(staged(3))
+    cheek = at(image, 0.44, 0.50)
+    assert 140 < cheek.green() < 200, cheek.getRgb()  # lighter, but the face shows through
+    for x, y in ((0.43, 0.40), (0.57, 0.40), (0.43, 0.36), (0.57, 0.36)):  # eyes and brows
+        assert at(image, x, y).green() == pytest.approx(120, abs=3), (x, y)
+    # No wig or hair: nothing above the forehead or beside the face is painted.
+    for x, y in ((0.5, 0.22), (0.30, 0.30), (0.70, 0.30), (0.30, 0.45)):
+        assert at(image, x, y).getRgb()[:3] == (120, 120, 120), (x, y)
+    lip = at(image, 0.5, 0.572)
+    assert lip.red() > lip.green() + 30, lip.getRgb()
+
+
+def test_white_makeup_strength_is_adjustable_and_bounded(qtbot) -> None:
+    light = at(render_on_gray(staged(3, 0.15)), 0.44, 0.50).green()
+    strong = at(render_on_gray(staged(3, 0.7)), 0.44, 0.50).green()
+    assert light < strong < 120 + 0.75 * (251 - 120)
+    effect = ClownEffect()
+    effect.set_makeup_opacity(5.0)
+    assert effect.makeup_opacity == 0.7
+    with pytest.raises(ConfigError):
+        EffectsSettings(clown_makeup_opacity=0.9)
+
+
+def test_lip_colour_keeps_the_texture_underneath(qtbot) -> None:
+    image = render_on_gray(staged(2), stripes=True)
+    row = 0.572 * 480
+    values = {image.pixelColor(x, int(row)).red() for x in range(310, 330)}
+    assert len(values) >= 2  # the stripes are still visible through the lip colour
+    assert at(image, 0.44, 0.50).getRgb()[:3] in ((120, 120, 120), (160, 160, 160))  # no base

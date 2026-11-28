@@ -30,7 +30,9 @@ def test_host_and_guest_services_with_panel(qtbot) -> None:
     host = host_services._coop_host
     port = host.port
     window._update_control_status()
-    assert "Code:" in window.coop_panel.code.text() and host.code in window.coop_panel.code.text()
+    # Brief 008: the code is shown on its own (Doomscroll Together panel), with the address.
+    assert window.coop_panel.code.text() == host.code
+    assert f"port {port}" in window.coop_panel.where.text()
 
     guest_services = offline_services()
     original = guest_services.dispatcher._controller

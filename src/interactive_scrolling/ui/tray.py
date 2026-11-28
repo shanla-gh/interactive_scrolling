@@ -47,6 +47,7 @@ class TrayController(QObject):
     mode_requested = Signal(str)
     """"developer", "creator" or "background"."""
     quit_requested = Signal()
+    broadcast_settings_requested = Signal()
 
     def __init__(self, hotkey_label: str = "", parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -64,8 +65,9 @@ class TrayController(QObject):
         disable_text = "Stop gesture control" + (f"  ({hotkey_label})" if hotkey_label else "")
         self.disable_action = self.menu.addAction(disable_text, self.disable_control.emit)
         self.menu.addSeparator()
-        self.menu.addAction("Developer Mode", lambda: self.mode_requested.emit("developer"))
+        self.menu.addAction("Normal Mode", lambda: self.mode_requested.emit("developer"))
         self.menu.addAction("Broadcast Mode", lambda: self.mode_requested.emit("creator"))
+        self.menu.addAction("Broadcast settings...", self.broadcast_settings_requested.emit)
         self.menu.addAction("Background Mode", lambda: self.mode_requested.emit("background"))
         self.menu.addSeparator()
         self.menu.addAction("Quit Interactive Scrolling", self.quit_requested.emit)

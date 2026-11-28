@@ -105,6 +105,8 @@ class CreatorOverlay(QWidget):
     background_requested = Signal()
     quit_requested = Signal()
     settings_changed = Signal(object)
+    settings_requested = Signal()
+    """Open Broadcast settings (overlay Settings button or menu)."""
 
     def __init__(
         self,
@@ -146,6 +148,10 @@ class CreatorOverlay(QWidget):
         self._big_font = mono_font(13, bold=True)
         self.transparent_state = "off"
         """off / active / unavailable: what the transparent background is actually doing."""
+        self._hover = False
+        """The mouse is over the overlay: show the Settings button (it is captured by
+        recording software only while the mouse is there)."""
+        self.setMouseTracking(True)
         self.apply_settings(settings, reposition=True)
 
     # ------------------------------------------------------------------ settings
@@ -265,9 +271,26 @@ class CreatorOverlay(QWidget):
     def _in_grip(self, pos: QPoint) -> bool:
         return pos.x() >= self.width() - GRIP_PX and pos.y() >= self.height() - GRIP_PX
 
+    def settings_button_rect(self) -> QRectF:
+        return QRectF(self.width() - 86, 8, 78, 24)
+
+    def enterEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        super().enterEvent(event)
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        super().leaveEvent(event)
+        self._hover = False
+        self.update()
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() is Qt.MouseButton.LeftButton:
             pos = event.position().toPoint()
+            if self._hover and self.settings_button_rect().contains(event.position()):
+                event.accept()
+                self.settings_requested.emit()
+                return
             self._resizing = self._in_grip(pos)
             self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
@@ -308,6 +331,8 @@ class CreatorOverlay(QWidget):
 
     def build_menu(self) -> QMenu:
         menu = QMenu(self)
+        menu.addAction("Broadcast settings...", self.settings_requested.emit)
+        menu.addSeparator()
         s = self.settings
         for field_name, label in (
             ("show_skeleton", "Hand skeleton"),
@@ -348,7 +373,7 @@ class CreatorOverlay(QWidget):
             action.triggered.connect(lambda _=False, c=corner: self.move_to_corner(c))
             position.addAction(action)
         menu.addSeparator()
-        menu.addAction("Developer Mode", self.developer_requested.emit)
+        menu.addAction("Normal Mode", self.developer_requested.emit)
         menu.addAction("Background Mode (tray)", self.background_requested.emit)
         menu.addSeparator()
         menu.addAction("Quit Interactive Scrolling", self.quit_requested.emit)
@@ -432,7 +457,18 @@ class CreatorOverlay(QWidget):
         if self.settings.show_control_state:
             self._paint_control_state(painter, target)
         self._paint_grip(painter)
+        if self._hover:
+            self._paint_settings_button(painter)
         painter.end()
+
+    def _paint_settings_button(self, painter: QPainter) -> None:
+        rect = self.settings_button_rect()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(17, 18, 20, 215))
+        painter.drawRoundedRect(rect, 6, 6)
+        painter.setPen(QColor(232, 234, 237))
+        painter.setFont(self.font())
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "Settings")
 
     def _paint_notice(self, painter: QPainter, text: str) -> None:
         painter.setFont(self._font)

@@ -142,8 +142,10 @@ class OverlaySettings:
 
     show_landmarks: bool = True
     show_skeleton: bool = True
-    show_bounding_box: bool = True
-    show_labels: bool = True
+    show_bounding_box: bool = False
+    show_labels: bool = False
+    """Hand box and handedness/confidence label: technical layers, off by default since
+    Brief 008 (Camera settings -> Show on camera)."""
     show_fingertip_trail: bool = True
     show_palm_trail: bool = False
     show_vectors: bool = True
@@ -338,6 +340,10 @@ class AppearanceSettings:
     """Status chips (tracking state, resolution) on the video."""
     getting_started_done: bool = False
     """The first-use guide was closed with "Don't show this at start"."""
+    console_expanded: bool = False
+    """Normal Mode: the Activity & diagnostics area is open (Brief 008)."""
+    show_now_playing: bool = True
+    """Normal Mode: the Now playing column (live Shorts preview) is shown."""
 
     def __post_init__(self) -> None:
         if not _valid_color(self.skeleton_color):
@@ -443,6 +449,8 @@ class EffectsSettings:
     clown_stage3_min: float = 30.0
     clown_preview_stage: int | None = None
     """Show this stage regardless of the session (for trying the effect); ``None`` = off."""
+    clown_makeup_opacity: float = 0.35
+    """Strength of the stage 3 white makeup (0.1-0.7; the face always stays visible)."""
     eye_analytics_enabled: bool = False
     eye_baseline_yaw: float | None = None
     """Result of the optional one-point calibration (``None``: not calibrated)."""
@@ -464,6 +472,13 @@ class EffectsSettings:
             raise ConfigError("Clown stage thresholds must not decrease.")
         if self.clown_preview_stage is not None and self.clown_preview_stage not in (0, 1, 2, 3):
             raise ConfigError("clown_preview_stage must be 0-3 or None.")
+        opacity = self.clown_makeup_opacity
+        if (
+            isinstance(opacity, bool)
+            or not isinstance(opacity, int | float)
+            or not (0.1 <= opacity <= 0.7)
+        ):
+            raise ConfigError(f"clown_makeup_opacity must be within [0.1, 0.7], got {opacity!r}.")
 
     @property
     def clown_thresholds(self) -> tuple[float, float, float]:
