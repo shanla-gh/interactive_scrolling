@@ -63,12 +63,34 @@ def stack() -> Iterator[tuple[Browser, BridgeServer, YouTubeShortsController, Se
 def open_short(page: Session, controller: YouTubeShortsController, query: str = "") -> None:
     page.call("Page.navigate", url=f"https://www.youtube.com/shorts/aaaaaaaaaa1{query}")
     page.wait_for("document.readyState === 'complete' && !!document.querySelector('video')")
+    # Wait for the report of *this* page: the previous test's page (possibly at the last Short,
+    # where next is unavailable) may still be the latest context for a moment (Brief 009: an
+    # intermittent 'no next Short available' on CI).
     assert wait_until(
         lambda: (
-            controller.status().ready and controller.status().signed_in is ("signed_in=1" in query)
+            controller.status().ready
+            and controller.status().signed_in is ("signed_in=1" in query)
+            and _seen_short(controller) == "aaaaaaaaaa1"
+            and _seen_can_next(controller) is not False
         ),
         timeout_s=10,
     ), controller.status()
+
+
+def _context_shorts(controller: YouTubeShortsController):  # type: ignore[no-untyped-def]
+    clients = controller.bridge.clients()
+    context = clients[0].context if clients else None
+    return context.shorts if context else None
+
+
+def _seen_short(controller: YouTubeShortsController) -> str | None:
+    shorts = _context_shorts(controller)
+    return shorts.video_id if shorts else None
+
+
+def _seen_can_next(controller: YouTubeShortsController) -> bool | None:
+    shorts = _context_shorts(controller)
+    return shorts.can_next if shorts else None
 
 
 def run(controller: YouTubeShortsController, action: ActionType):
