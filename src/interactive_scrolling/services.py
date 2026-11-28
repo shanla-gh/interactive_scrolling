@@ -260,14 +260,21 @@ class ControlServices:
             return guest.status()
         return CoopStatus(role="off", state="no session")
 
-    def host_coop(self, name: str, port: int) -> str:
-        """Create a co-op session on this computer (this browser is the shared feed)."""
+    def host_coop(self, name: str, port: int, bind: str = "0.0.0.0") -> str:
+        """Create a co-op session on this computer (this browser is the shared feed).
+
+        ``bind``: the private network address to listen on, or ``0.0.0.0`` for all private
+        networks (peers from public addresses are refused either way)."""
         self.leave_coop()
         host = getattr(self, "_coop_host", None)
         if host is None:
             host = CoopHost(self.dispatcher, name, port)
             self._coop_host = host
-        return host.start(name, port)
+        return host.start(name, port, bind)
+
+    def renew_coop_invitation(self) -> str | None:
+        host = getattr(self, "_coop_host", None)
+        return host.renew_invitation() if host is not None else None
 
     def end_coop(self) -> None:
         host = getattr(self, "_coop_host", None)
