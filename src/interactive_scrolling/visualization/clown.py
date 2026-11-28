@@ -55,7 +55,7 @@ DEFAULT_MAKEUP_OPACITY = 0.35
 MIN_MAKEUP_OPACITY = 0.1
 MAX_MAKEUP_OPACITY = 0.7
 """The white makeup never covers the face completely (the face must stay recognizable)."""
-FEATHER_LAYERS = 6
+FEATHER_LAYERS = 10
 FEATHER_DEPTH = 0.22
 """The white base fades out over the outer 22 % of the face outline."""
 
@@ -157,13 +157,14 @@ class ClownEffect:
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if w3 > 0:
-            holes = QPainterPath()
-            for eye in (RIGHT_EYE, LEFT_EYE):
-                holes.addPath(_path([p(i) for i in eye], 1.45))
-            for brow in (RIGHT_BROW, LEFT_BROW):
-                holes.addPath(_path([p(i) for i in brow], 1.3))
-            holes.addPath(_path([p(i) for i in LIPS_OUTER], 1.08))
-            self._paint_base(painter, [p(i) for i in FACE_OVAL], holes, w3 * self.makeup_opacity)
+            features = [
+                ([p(i) for i in RIGHT_EYE], 1.0),
+                ([p(i) for i in LEFT_EYE], 1.0),
+                ([p(i) for i in RIGHT_BROW], 0.8),
+                ([p(i) for i in LEFT_BROW], 0.8),
+                ([p(i) for i in LIPS_OUTER], 0.35),
+            ]
+            self._paint_base(painter, [p(i) for i in FACE_OVAL], features, w3 * self.makeup_opacity)
         if w2 > 0:
             outer = _path([p(i) for i in LIPS_OUTER])
             inner = _path([p(i) for i in LIPS_INNER])
@@ -174,17 +175,26 @@ class ClownEffect:
 
     @staticmethod
     def _paint_base(
-        painter: QPainter, oval: list[QPointF], holes: QPainterPath, strength: float
+        painter: QPainter,
+        oval: list[QPointF],
+        features: list[tuple[list[QPointF], float]],
+        strength: float,
     ) -> None:
-        """Translucent white base: strongest in the middle of the face, fading to nothing at the
-        outline (no hard mask edge), never over the eyes, eyebrows or lips."""
+        """Translucent white base, feathered both towards the face outline and towards the
+        eyes, eyebrows and lips: each layer is a slightly smaller face region with slightly
+        smaller cut-outs, so the makeup fades out instead of ending in a hard edge."""
         if strength <= 0:
             return
         painter.setPen(Qt.PenStyle.NoPen)
+        brush = _color("#fbfaf7", strength / FEATHER_LAYERS)
         for k in range(FEATHER_LAYERS):
-            scale = 1.0 - k * (FEATHER_DEPTH / FEATHER_LAYERS)
-            region = _path(oval, scale).subtracted(holes)
-            painter.setBrush(_color("#fbfaf7", strength / FEATHER_LAYERS))
+            inner = k / (FEATHER_LAYERS - 1)  # 0 = outermost layer, 1 = innermost
+            region = _path(oval, 1.0 - inner * FEATHER_DEPTH)
+            for points, margin in features:
+                # Outer layers keep a wide margin around a feature, inner layers a tight one.
+                scale = 1.08 + margin * (1.0 - inner) * 0.9
+                region = region.subtracted(_path(points, scale))
+            painter.setBrush(brush)
             painter.drawPath(region)
 
     @staticmethod
