@@ -278,6 +278,8 @@ def main() -> int:
             t = frame.tracking
             record = {
                 "t_ns": t.timestamp_ns,
+                # Brief 009: the driver's sample time, for evaluating periodic timing later.
+                "sample_ns": frame.sample_ns,
                 "label": state["label"],
                 "segment": state["index"],
                 "w": t.image_width,

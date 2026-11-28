@@ -88,6 +88,8 @@ class ProcessedFrame:
     gestures: GestureFrame | None = None
     gesture_ms: float | None = None
     """Time spent in gesture recognition for this frame."""
+    sample_ns: int | None = None
+    """The camera driver's sample time of the frame on the same clock, if available."""
 
     @property
     def latency_ms(self) -> float:
@@ -433,6 +435,7 @@ class VisionPipeline:
                     processing_ms=(completed - started) / NS_PER_MS,
                     gestures=gestures,
                     gesture_ms=gesture_ms,
+                    sample_ns=frame.sample_ns,
                 )
                 self._frames_processed += 1
                 self._processing_rate.tick(completed)

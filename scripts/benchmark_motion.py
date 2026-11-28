@@ -176,7 +176,8 @@ def degrade(frames: list[dict], how: str, seed: int = 6) -> list[dict]:
     """Synthetic degradations of a real recording (engineering checks, not physical evidence):
     ``fps15`` / ``fps20`` keep every 2nd / 2 of 3 frames, ``drop10`` loses 10 % of the frames at
     random, ``jitter`` adds +-8 ms of timestamp noise (the measured delivery jitter is 5 ms sd),
-    ``blur`` removes the hand from 15 % of the frames of fast movement (landmark dropouts)."""
+    ``blur`` removes the hand from 15 % of the frames of fast movement (landmark dropouts),
+    ``periodic`` replaces the bursty arrival times with periodic sample times (driver clock)."""
     import random
 
     rng = random.Random(seed)
@@ -193,6 +194,22 @@ def degrade(frames: list[dict], how: str, seed: int = 6) -> list[dict]:
             t = max(t, last + 1_000_000)
             last = t
             out.append({**f, "t_ns": t})
+        return out
+    if how == "periodic":
+        # Brief 009: approximate the driver's exactly periodic sample times - each frame moved
+        # to the nearest multiple of the median interval (strictly increasing).
+        import itertools
+        import statistics
+
+        times = [f["t_ns"] for f in frames]
+        period = statistics.median(b - a for a, b in itertools.pairwise(times))
+        out, last = [], None
+        for f in frames:
+            slot = times[0] + round((f["t_ns"] - times[0]) / period) * period
+            if last is not None and slot <= last:
+                slot = last + period
+            last = slot
+            out.append({**f, "t_ns": int(slot)})
         return out
     if how == "blur":
         import numpy as np
@@ -266,7 +283,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--degrade",
-        choices=["fps15", "fps20", "drop10", "jitter", "blur"],
+        choices=["fps15", "fps20", "drop10", "jitter", "blur", "periodic"],
         help="score SYNTHETIC degradations of the development recordings",
     )
     parser.add_argument("--json", type=Path)

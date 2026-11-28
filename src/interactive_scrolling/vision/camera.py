@@ -50,6 +50,10 @@ class Frame:
     image_bgr: np.ndarray
     index: int
     timestamp_ns: int
+    sample_ns: int | None = None
+    """The driver's own sample time mapped onto the same clock (Media Foundation only), or
+    ``None``. Recorded for analysis; recognition uses ``timestamp_ns`` (Brief 009: the engine
+    is tuned on arrival times and regressed when replayed with periodic times)."""
 
     @property
     def width(self) -> int:
@@ -105,6 +109,51 @@ def normalize_frame_image(image: Any) -> np.ndarray | None:
     return None
 
 
+class DriverClock:
+    """Maps the driver's own frame times onto the application clock (Brief 009).
+
+    Media Foundation reports a sample time per frame (``CAP_PROP_POS_MSEC``) that is exactly
+    periodic, while the moment ``read()`` returns jitters by 5-7 ms (standard deviation,
+    measured with ``scripts/probe_camera_modes.py``). Motion speeds use frame intervals, so the
+    driver times give cleaner velocities. The mapping offset is the smallest observed
+    ``arrival - sample`` time, so a mapped timestamp is never later than the frame's arrival;
+    it creeps upwards by ``CREEP_NS`` per frame so drift between the two clocks cannot
+    accumulate. Invalid driver values (missing, not increasing, gaps over a second) fall back
+    to the arrival time and restart the mapping.
+    """
+
+    CREEP_NS = 10_000
+
+    def __init__(self) -> None:
+        self._offset_ns: int | None = None
+        self._last_sample_ns: int | None = None
+        self.driver_frames = 0
+        self.fallback_frames = 0
+
+    def reset(self) -> None:
+        self._offset_ns = None
+        self._last_sample_ns = None
+
+    def map(self, sample_ms: float, arrival_ns: int) -> int:
+        valid = sample_ms > 0
+        sample_ns = int(sample_ms * 1_000_000)
+        last = self._last_sample_ns
+        if valid and last is not None and not (0 < sample_ns - last < 1_000_000_000):
+            valid = False
+        if not valid:
+            self.reset()
+            self.fallback_frames += 1
+            return arrival_ns
+        self._last_sample_ns = sample_ns
+        delay = arrival_ns - sample_ns
+        if self._offset_ns is None:
+            self._offset_ns = delay
+        else:
+            self._offset_ns = min(self._offset_ns + self.CREEP_NS, delay)
+        self.driver_frames += 1
+        return min(arrival_ns, sample_ns + self._offset_ns)
+
+
 class OpenCVCamera:
     """A webcam opened through ``cv2.VideoCapture``."""
 
@@ -114,6 +163,7 @@ class OpenCVCamera:
         capture_factory: CaptureFactory = _default_capture_factory,
         clock: Clock = now_ns,
         warmup_attempts: int = 20,
+        use_driver_timestamps: bool = True,
     ) -> None:
         self._settings = settings
         self._factory = capture_factory
@@ -125,6 +175,8 @@ class OpenCVCamera:
         self.actual_width = 0
         self.actual_height = 0
         self.reported_fps = 0.0
+        self.driver_clock = DriverClock() if use_driver_timestamps else None
+        """Maps driver sample times (Media Foundation only) into ``Frame.sample_ns``."""
 
     @property
     def settings(self) -> CameraSettings:
@@ -200,7 +252,18 @@ class OpenCVCamera:
         timestamp = self._clock()
         if image is None:
             return None
-        frame = Frame(image_bgr=image, index=self._next_index, timestamp_ns=timestamp)
+        sample_ns = None
+        clock = self.driver_clock
+        if clock is not None and self._settings.backend is CameraBackend.MSMF:
+            try:
+                sample_ms = float(capture.get(cv2.CAP_PROP_POS_MSEC))
+            except cv2.error:
+                sample_ms = 0.0
+            mapped = clock.map(sample_ms, timestamp)
+            sample_ns = mapped if mapped != timestamp or sample_ms > 0 else None
+        frame = Frame(
+            image_bgr=image, index=self._next_index, timestamp_ns=timestamp, sample_ns=sample_ns
+        )
         self._next_index += 1
         return frame
 

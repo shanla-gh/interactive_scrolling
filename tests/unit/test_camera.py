@@ -190,3 +190,41 @@ def test_probe_cameras_reports_working_devices_and_releases_all() -> None:
     assert [(c.index, c.width, c.height) for c in found] == [(0, 640, 480), (3, 1280, 720)]
     assert all(c.released == 1 for c in captures.values())
     assert "1280x720" in found[1].label
+
+
+# ---------------------------------------------------------------------- driver timestamps
+
+
+def test_driver_clock_gives_periodic_times_never_after_arrival() -> None:
+    import itertools
+    import random
+
+    from interactive_scrolling.vision.camera import DriverClock
+
+    rng = random.Random(4)
+    clock = DriverClock()
+    mapped = []
+    for i in range(300):
+        sample_ms = 1000.0 + i * 33.333
+        arrival = int(5e9 + sample_ms * 1e6 + 8e6 + rng.uniform(0, 12e6))  # jittered delivery
+        t = clock.map(sample_ms, arrival)
+        assert t <= arrival
+        mapped.append(t)
+    intervals = [(b - a) / 1e6 for a, b in itertools.pairwise(mapped[50:])]
+    # vs about 12 ms spread of the arrival times; the creep (0.01 ms/frame) and rare snaps
+    # to a smaller delay are the only variation.
+    assert max(intervals) - min(intervals) < 2.0
+    assert sorted(intervals)[len(intervals) // 2] == pytest.approx(33.343, abs=0.02)
+    assert clock.driver_frames == 300 and clock.fallback_frames == 0
+
+
+def test_driver_clock_falls_back_on_invalid_sample_times() -> None:
+    from interactive_scrolling.vision.camera import DriverClock
+
+    clock = DriverClock()
+    assert clock.map(0.0, 123) == 123  # no driver time
+    clock.map(100.0, 200_000_000)
+    assert clock.map(90.0, 210_000_000) == 210_000_000  # went backwards: mapping restarts
+    clock.map(120.0, 230_000_000)
+    assert clock.map(5000.0, 240_000_000) == 240_000_000  # jumped by seconds
+    assert clock.fallback_frames == 3
