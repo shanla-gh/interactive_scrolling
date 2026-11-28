@@ -12,6 +12,8 @@
                   the unavailable button's host is hidden (aria-hidden, visibility: hidden)
                   while the button stays enabled, as on the live site at the first Short
     load_ms=<n>   after a navigation the new Short's video needs n ms to load
+    clock=1       the video shows the page's wall clock (Date.now() mod 65536 ms) as a 4x4 grid
+                  of black/white blocks, redrawn at 60 Hz, to measure the live preview delay
 -->
 <head>
   <meta charset="utf-8" />
@@ -112,8 +114,20 @@
       canvas.width = 72; canvas.height = 128;
       const ctx = canvas.getContext("2d");
       let frame = 0;
-      setInterval(() => { ctx.fillStyle = `hsl(${(frame++ * 7) % 360},60%,40%)`; ctx.fillRect(0, 0, 72, 128); }, 66);
-      const stream = canvas.captureStream(15);
+      const clock = params.get("clock") === "1";
+      function drawClock() {
+        const value = Date.now() % 65536;
+        for (let bit = 0; bit < 16; bit++) {
+          ctx.fillStyle = (value >> bit) & 1 ? "#fff" : "#000";
+          ctx.fillRect((bit % 4) * 18, Math.floor(bit / 4) * 32, 18, 32);
+        }
+      }
+      if (clock) {
+        setInterval(drawClock, 16);
+      } else {
+        setInterval(() => { ctx.fillStyle = `hsl(${(frame++ * 7) % 360},60%,40%)`; ctx.fillRect(0, 0, 72, 128); }, 66);
+      }
+      const stream = canvas.captureStream(clock ? 60 : 15);
       video.srcObject = stream;
       render();
       video.play().catch(() => {});

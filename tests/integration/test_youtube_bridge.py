@@ -183,7 +183,7 @@ def test_authenticated_extension_is_registered(server) -> None:
     bridge, controller, _ = server
     ext = FakeExtension(bridge.port)
     try:
-        assert ext.welcome == {"type": "welcome", "protocol": 2}
+        assert ext.welcome == {"type": "welcome", "protocol": 3}
         assert wait_until(lambda: len(bridge.clients()) == 1)
         assert (
             controller.check(ActionType.NEXT_SHORT).reason

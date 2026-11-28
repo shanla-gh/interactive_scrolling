@@ -27,6 +27,15 @@ a candidate only if its context reports that one of its normal windows has the o
 system focus. The extension then moves to the neighbouring tab of that focused window only
 (never another window, never another application, no wrap-around at the first or last tab)
 and confirms the newly active tab.
+
+Preview control (live preview, protocol 3)
+------------------------------------------
+While the user shows a Shorts tab in the app's live preview (started by the user in the
+extension popup on that tab) **and** an Interactive Scrolling window is the active window, the
+Shorts commands go to that one authorized tab, addressed by its tab id; the extension refuses
+any other id and rechecks that the tab still shows the expected Short. Outside this condition
+the ordinary policy above applies unchanged. Tab switching never uses the preview path: it
+still needs the browser to be the active window. Stopping the preview revokes the target.
 """
 
 from __future__ import annotations
@@ -46,7 +55,7 @@ from interactive_scrolling.actions.types import (
 )
 from interactive_scrolling.core.timing import NS_PER_S, Clock, now_ns
 from interactive_scrolling.integrations.youtube.bridge import BridgeServer, ClientInfo
-from interactive_scrolling.integrations.youtube.protocol import CommandResult
+from interactive_scrolling.integrations.youtube.protocol import CommandResult, ShortsTab
 
 log = logging.getLogger(__name__)
 
@@ -76,11 +85,25 @@ class YouTubeStatus:
     liked: bool | None = None
     browser_focused: bool | None = None
     """Whether the target browser has the operating-system focus."""
+    preview: bool = False
+    """A live preview of a Shorts tab is authorized (started by the user in the browser)."""
+    via_preview: bool = False
+    """Shorts commands currently go to the previewed tab (the app is the active window)."""
 
     @property
     def actively_scrolling(self) -> bool:
-        """A loaded Short is playing in the focused browser (see wellbeing.sessions)."""
-        return self.ready and self.browser_focused is True and self.paused is False
+        """A loaded Short is playing in front of the user: in the focused browser or in the
+        app's live preview while the app is the active window (see wellbeing.sessions)."""
+        in_front = self.browser_focused is True or self.via_preview
+        return self.ready and in_front and self.paused is False
+
+
+@dataclass(frozen=True, slots=True)
+class _Target:
+    client: ClientInfo
+    shorts: ShortsTab
+    tab_id: int | None = None
+    """Set when the command is addressed to the authorized preview tab."""
 
 
 class YouTubeShortsController:
@@ -96,22 +119,39 @@ class YouTubeShortsController:
         self._session_active = False
         self._session_lock = threading.Lock()
         self._shorts_seen_ns: int | None = None
+        self.app_in_front = False
+        """Set by the UI: an Interactive Scrolling window is the active window. Together with
+        an authorized live preview it routes Shorts commands to the previewed tab."""
         self._arriving: tuple[str, str, int] | None = None
         """(client id, video id, time) of the Short a confirmed navigation moved to, until the
         browser reports it."""
 
     # ------------------------------------------------------------------ target selection
 
-    def _target(self, action: ActionType | None = None) -> tuple[ClientInfo | None, str]:
-        client, reason, _ = self._shorts_target(action)
-        return client, reason
+    def _target(self, action: ActionType | None = None) -> tuple[_Target | None, str]:
+        target, reason, _ = self._shorts_target(action)
+        return target, reason
 
     def _recently_seen(self, now: int) -> bool:
         seen = self._shorts_seen_ns
         return seen is not None and now - seen <= int(SHORTS_GRACE_S * NS_PER_S)
 
-    def _shorts_target(self, action: ActionType | None) -> tuple[ClientInfo | None, str, bool]:
-        """(client, refusal reason, whether the refusal is transient)."""
+    def _candidates(
+        self, fresh: list[ClientInfo]
+    ) -> tuple[list[tuple[ClientInfo, ShortsTab | None, int | None]], bool]:
+        """(client, Shorts state, preview tab id) candidates, and whether they come from the
+        authorized live preview."""
+        if self.app_in_front:
+            previews = [c for c in fresh if c.context.preview is not None]  # type: ignore[union-attr]
+            if previews:
+                previews.sort(key=lambda c: c.context.focus_ts, reverse=True)  # type: ignore[union-attr]
+                client = previews[0]
+                tab = client.context.preview  # type: ignore[union-attr]
+                return [(client, tab.shorts, tab.tab_id)], True
+        return [(c, c.context.shorts, None) for c in fresh], False  # type: ignore[union-attr]
+
+    def _shorts_target(self, action: ActionType | None) -> tuple[_Target | None, str, bool]:
+        """(target, refusal reason, whether the refusal is transient)."""
         if not self.bridge.listening:
             return None, self.bridge.error or "browser bridge not running", False
         clients = self.bridge.clients()
@@ -127,28 +167,26 @@ class YouTubeShortsController:
         ]
         if not fresh:
             return None, "waiting for the browser to report its state", recent
-        with_shorts = [c for c in fresh if c.context.shorts is not None]  # type: ignore[union-attr]
+        candidates, via_preview = self._candidates(fresh)
+        with_shorts = [(c, s, t) for c, s, t in candidates if s is not None]
         if not with_shorts:
             if recent:
                 return None, "the Short is changing", True
+            if via_preview:
+                return None, "the previewed tab is not showing a YouTube Short", False
             return None, "no YouTube Shorts tab is active in the browser", False
-        ready = [
-            c
-            for c in with_shorts
-            if c.context.shorts.visible and c.context.shorts.has_video  # type: ignore[union-attr]
-        ]
+        ready = [(c, s, t) for c, s, t in with_shorts if s.visible and s.has_video]
         if not ready:
             return None, "the Shorts tab is not visible or has no video", recent
         self._shorts_seen_ns = now
-        loaded = [c for c in ready if c.context.shorts.video_ready is not False]  # type: ignore[union-attr]
+        loaded = [(c, s, t) for c, s, t in ready if s.video_ready is not False]
         if not loaded:
             return None, "the Short is still loading", True
         ready = loaded
-        ready.sort(key=lambda c: c.context.focus_ts, reverse=True)  # type: ignore[union-attr]
-        if len(ready) > 1 and ready[0].context.focus_ts == ready[1].context.focus_ts:  # type: ignore[union-attr]
+        ready.sort(key=lambda item: item[0].context.focus_ts, reverse=True)  # type: ignore[union-attr]
+        if len(ready) > 1 and ready[0][0].context.focus_ts == ready[1][0].context.focus_ts:  # type: ignore[union-attr]
             return None, "several browsers show Shorts; click the one to control", False
-        client = ready[0]
-        shorts = client.context.shorts  # type: ignore[union-attr]
+        client, shorts, tab_id = ready[0]
         arriving = self._arriving
         if arriving is not None:
             client_id, video_id, since = arriving
@@ -164,7 +202,7 @@ class YouTubeShortsController:
             return None, "already at the first Short", False
         if action is ActionType.NEXT_SHORT and shorts.can_next is False:
             return None, "no next Short available", False
-        return client, "", False
+        return _Target(client, shorts, tab_id), "", False
 
     def _tab_target(self) -> tuple[ClientInfo | None, str]:
         if not self.bridge.listening:
@@ -192,7 +230,7 @@ class YouTubeShortsController:
             return None, "browser extension is outdated; reload it in the extensions page"
         return client, ""
 
-    def _target_for(self, action: ActionType) -> tuple[ClientInfo | None, str]:
+    def _target_for(self, action: ActionType) -> tuple[_Target | ClientInfo | None, str]:
         if action in TAB_ACTIONS:
             return self._tab_target()
         return self._target(action)
@@ -208,10 +246,11 @@ class YouTubeShortsController:
         return ControllerCheck(client is not None, reason, transient=transient)
 
     def status(self) -> YouTubeStatus:
-        client, reason, transient = self._shorts_target(None)
-        self._update_session(client is not None or transient)
+        target, reason, transient = self._shorts_target(None)
+        self._update_session(target is not None or transient)
         clients = self.bridge.clients()
-        shorts = client.context.shorts if client and client.context else None
+        client = target.client if target is not None else None
+        shorts = target.shorts if target is not None else None
         return YouTubeStatus(
             listening=self.bridge.listening,
             bridge_error=self.bridge.error,
@@ -224,19 +263,26 @@ class YouTubeShortsController:
             paused=shorts.paused if shorts else None,
             liked=shorts.liked if shorts else None,
             browser_focused=client.context.browser_focused if client and client.context else None,
+            preview=any(c.context is not None and c.context.preview is not None for c in clients),
+            via_preview=target is not None and target.tab_id is not None,
         )
 
     # ------------------------------------------------------------------ execution
 
     def execute(self, action: ActionType, request_id: str, timeout_s: float) -> ActionResult:
-        client, reason = self._target_for(action)
-        if client is None:
+        found, reason = self._target_for(action)
+        if found is None:
             return ActionResult(ActionStatus.REJECTED, reason)
         video_id = None
-        if action in SHORTS_ACTIONS:
-            video_id = client.context.shorts.video_id  # type: ignore[union-attr]
+        tab_id = None
+        if isinstance(found, _Target):
+            client = found.client
+            video_id = found.shorts.video_id
+            tab_id = found.tab_id
+        else:
+            client = found
         response = self.bridge.request(
-            client.client_id, request_id, action.value, video_id, timeout_s
+            client.client_id, request_id, action.value, video_id, timeout_s, tab_id
         )
         if isinstance(response, str):
             # No confirmation: the command may or may not have taken effect.

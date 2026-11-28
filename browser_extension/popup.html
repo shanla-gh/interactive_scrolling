@@ -4,30 +4,47 @@
     <meta charset="utf-8" />
     <title>Interactive Scrolling</title>
     <style>
-      body { margin: 0; width: 290px; font: 13px "Segoe UI", sans-serif; background: #0b0d10; color: #e6edf3; }
-      main { padding: 14px; }
-      h1 { margin: 0 0 2px; font-size: 15px; }
-      h1 span { color: #3dff9a; }
-      p { margin: 4px 0 10px; color: #8b949e; }
-      label { display: block; margin: 8px 0 4px; color: #8b949e; font-size: 12px; }
-      input { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 6px;
-              border: 1px solid #262b33; background: #1b1f26; color: #e6edf3; }
-      button { margin-top: 12px; width: 100%; padding: 7px; border-radius: 6px; border: 1px solid #1f6b47;
-               background: #12352a; color: #3dff9a; font-weight: 700; cursor: pointer; }
-      #status { margin-top: 10px; padding: 6px 8px; border-radius: 6px; background: #14171c; }
-      .connected { color: #3dff9a; } .problem { color: #ffb547; }
+      body { margin: 0; width: 300px; font: 13px "Segoe UI", sans-serif; background: #111315; color: #e8eaed; }
+      main { padding: 14px 16px 16px; }
+      h1 { margin: 0 0 2px; font-size: 14px; font-weight: 600; }
+      p { margin: 4px 0 10px; color: #9aa0a6; line-height: 1.35; }
+      section { border-top: 1px solid #24272b; margin-top: 12px; padding-top: 10px; }
+      h2 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: #c4c7cb; }
+      label { display: block; margin: 8px 0 4px; color: #9aa0a6; font-size: 12px; }
+      input { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 5px;
+              border: 1px solid #2c3035; background: #1a1d20; color: #e8eaed; }
+      button { margin-top: 10px; width: 100%; padding: 7px; border-radius: 5px; border: 1px solid #2c3035;
+               background: #1f2226; color: #e8eaed; font: inherit; cursor: pointer; }
+      button.primary { background: #2f8f5b; border-color: #2f8f5b; color: #fff; font-weight: 600; }
+      button:disabled { opacity: 0.45; cursor: default; }
+      #status, #preview-status { margin-top: 8px; color: #9aa0a6; }
+      .connected { color: #5fd08f !important; } .problem { color: #e6a23c !important; }
+      details summary { cursor: pointer; color: #9aa0a6; font-size: 12px; }
     </style>
   </head>
   <body>
     <main>
-      <h1>interactive<span>_scrolling</span></h1>
-      <p>Connects YouTube Shorts in this browser to the desktop app on this computer.</p>
-      <label for="token">Pairing code (from the app's YouTube panel)</label>
-      <input id="token" type="password" autocomplete="off" spellcheck="false" />
-      <label for="port">Local port</label>
-      <input id="port" type="number" min="1024" max="65535" />
-      <button id="save">Save and connect</button>
+      <h1>Interactive Scrolling</h1>
       <div id="status">...</div>
+
+      <section>
+        <h2>Live preview</h2>
+        <p>Shows the Short playing in this tab inside the desktop app. Only the video area is
+          sent, only to the app on this computer, and without sound.</p>
+        <button id="preview" class="primary" disabled>Show this Short in the app</button>
+        <div id="preview-status"></div>
+      </section>
+
+      <section>
+        <details id="pairing">
+          <summary>Pairing</summary>
+          <label for="token">Pairing code (from the app's Browser section)</label>
+          <input id="token" type="password" autocomplete="off" spellcheck="false" />
+          <label for="port">Local port</label>
+          <input id="port" type="number" min="1024" max="65535" />
+          <button id="save">Save and connect</button>
+        </details>
+      </section>
     </main>
     <script src="popup.js"></script>
   </body>

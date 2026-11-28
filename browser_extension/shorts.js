@@ -48,6 +48,31 @@
     return null;
   }
 
+  function videoRect(video) {
+    // Area of the playing Short in viewport CSS pixels (used to crop the live preview so the
+    // rest of the page is never sent), clipped to the viewport.
+    if (!video) return null;
+    // YouTube's video element can be wider than the rounded player that shows it; the player
+    // box is what the user sees.
+    const player = video.closest(".html5-video-player, #shorts-player") || video;
+    const v = video.getBoundingClientRect();
+    const p = player.getBoundingClientRect();
+    const r = {
+      left: Math.max(v.left, p.left),
+      top: Math.max(v.top, p.top),
+      right: Math.min(v.right, p.right),
+      bottom: Math.min(v.bottom, p.bottom),
+    };
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const x = Math.max(0, r.left);
+    const y = Math.max(0, r.top);
+    const w = Math.min(vw, r.right) - x;
+    const h = Math.min(vh, r.bottom) - y;
+    if (w < 16 || h < 16) return null;
+    return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), vw, vh };
+  }
+
   function readState() {
     const id = videoIdFromLocation();
     const video = id ? activeVideo() : null;
@@ -65,6 +90,7 @@
       signed_in: id ? signedIn() : null,
       can_previous: id ? navigationAvailable("up") : null,
       can_next: id ? navigationAvailable("down") : null,
+      video_rect: videoRect(video),
     };
   }
 

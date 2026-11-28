@@ -69,7 +69,7 @@ def test_valid_messages() -> None:
         "not json",
         "[]",
         msg(type="eval", code="alert(1)"),
-        msg(type="hello", protocol=3, token="x" * 20, browser="edge"),
+        msg(type="hello", protocol=4, token="x" * 20, browser="edge"),
         msg(type="hello", protocol=True, token="x" * 20, browser="edge"),
         msg(type="result", id=RID, outcome="succeeded", tab_index_after=-1),
         msg(type="result", id=RID, outcome="succeeded", tab_count="3"),

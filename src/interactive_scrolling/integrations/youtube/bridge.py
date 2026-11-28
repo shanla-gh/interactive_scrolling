@@ -10,10 +10,14 @@ Security boundaries
 * Messages are size limited and validated against a strict schema
   (:mod:`.protocol`); repeated invalid messages close the connection.
 * The server only sends six fixed commands. There is no generic command channel.
+* ``/preview`` (same origin and pairing-code checks) carries the live preview of the one tab
+  the user chose in the extension popup: binary JPEG frames, each validated and size limited.
+  Only one preview connection exists at a time; frames are never stored.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hmac
 import logging
 import threading
@@ -27,10 +31,13 @@ from websockets.sync.server import Server, ServerConnection, serve
 
 from interactive_scrolling.core.timing import Clock, now_ns
 from interactive_scrolling.integrations.youtube import protocol
+from interactive_scrolling.integrations.youtube.preview import PreviewFeed
 from interactive_scrolling.integrations.youtube.protocol import (
     CommandResult,
     Context,
     Hello,
+    PreviewHello,
+    PreviewState,
     ProtocolError,
 )
 
@@ -74,8 +81,11 @@ class BridgeServer:
         allowed_origins: frozenset[str] = ALLOWED_ORIGINS,
         on_change: Callable[[], None] | None = None,
         clock: Clock = now_ns,
+        preview: PreviewFeed | None = None,
     ) -> None:
         self.port = port
+        self.preview = preview if preview is not None else PreviewFeed()
+        self._preview_connection: ServerConnection | None = None
         self._token = token
         self._allowed_origins = allowed_origins
         self._on_change = on_change
@@ -100,7 +110,9 @@ class BridgeServer:
                 "127.0.0.1",
                 self.port,
                 process_request=self._check_request,
-                max_size=protocol.MAX_MESSAGE_BYTES,
+                # Text messages are limited to MAX_MESSAGE_BYTES by protocol.parse; only the
+                # preview connection may send larger (binary) frames.
+                max_size=protocol.MAX_PREVIEW_FRAME_BYTES + 64,
                 ping_interval=20,
                 ping_timeout=20,
                 server_header=None,
@@ -154,6 +166,8 @@ class BridgeServer:
         self._token = token
         with self._lock:
             connections = list(self._connections.values())
+            if self._preview_connection is not None:
+                connections.append(self._preview_connection)
         for connection in connections:
             connection.close(4001, "pairing code changed")
 
@@ -175,10 +189,18 @@ class BridgeServer:
     # ------------------------------------------------------------------ commands
 
     def request(
-        self, client_id: str, request_id: str, action: str, video_id: str | None, timeout_s: float
+        self,
+        client_id: str,
+        request_id: str,
+        action: str,
+        video_id: str | None,
+        timeout_s: float,
+        tab_id: int | None = None,
     ) -> CommandResult | str:
         """Send a command and wait for its result. Returns the result or an error string."""
-        message = protocol.command_message(request_id, action, video_id, int(timeout_s * 1000))
+        message = protocol.command_message(
+            request_id, action, video_id, int(timeout_s * 1000), tab_id
+        )
         with self._lock:
             connection = self._connections.get(client_id)
             if connection is None:
@@ -212,13 +234,21 @@ class BridgeServer:
 
     def _check_request(self, connection: ServerConnection, request: Request) -> Response | None:
         origin = request.headers.get("Origin")
-        if request.path != "/bridge" or origin not in self._allowed_origins:
+        if request.path not in ("/bridge", "/preview") or origin not in self._allowed_origins:
             self.rejected_connections += 1
             log.warning("Rejected bridge connection (path %s, origin %s)", request.path, origin)
             return connection.respond(403, "Forbidden\n")
         return None
 
+    def stop_preview(self) -> bool:
+        """Ask the browser to end the live preview (revokes the preview tab authorization)."""
+        return self.preview.request_stop()
+
     def _handle(self, connection: ServerConnection) -> None:
+        request = connection.request
+        if request is not None and request.path == "/preview":
+            self._handle_preview(connection)
+            return
         try:
             first = connection.recv(timeout=HELLO_TIMEOUT_S)
             hello = protocol.parse(first)
@@ -286,6 +316,64 @@ class BridgeServer:
                 pending.event.set()
             log.info("Browser extension disconnected (%s)", client.browser)
             self._notify()
+
+    def _handle_preview(self, connection: ServerConnection) -> None:
+        try:
+            first = connection.recv(timeout=HELLO_TIMEOUT_S)
+            hello = protocol.parse(first)
+            if not isinstance(hello, PreviewHello) or not hmac.compare_digest(
+                hello.token.encode(), self._token.encode()
+            ):
+                raise ProtocolError("authentication failed")
+        except (TimeoutError, ProtocolError, ConnectionClosed) as exc:
+            self.rejected_connections += 1
+            log.warning("Preview connection not authenticated: %s", exc)
+            connection.close(4001, "unauthorized")
+            return
+        with self._lock:
+            previous, self._preview_connection = self._preview_connection, connection
+        if previous is not None:
+            previous.close(1000, "replaced by a new preview")
+
+        def stop() -> None:
+            with contextlib.suppress(ConnectionClosed):
+                connection.send(protocol.PREVIEW_STOP)
+
+        self.preview.attach(stop)
+        log.info("Live preview connected")
+        invalid = 0
+        reason = "the browser ended the preview"
+        try:
+            connection.send(protocol.PREVIEW_WELCOME)
+            for raw in connection:
+                try:
+                    if isinstance(raw, bytes):
+                        self.preview.push(protocol.parse_preview_frame(raw))
+                        continue
+                    message = protocol.parse(raw)
+                    if not isinstance(message, PreviewState):
+                        raise ProtocolError("unexpected message on the preview connection")
+                except ProtocolError as exc:
+                    invalid += 1
+                    log.warning("Invalid preview message: %s", exc)
+                    if invalid >= MAX_INVALID_MESSAGES:
+                        connection.close(1008, "too many invalid messages")
+                        reason = "the preview sent invalid data"
+                        break
+                    continue
+                self.preview.set_state(message.state, message.reason)
+                if message.state == "stopped":
+                    reason = message.reason or reason
+        except ConnectionClosed:
+            pass
+        finally:
+            with self._lock:
+                current = self._preview_connection is connection
+                if current:
+                    self._preview_connection = None
+            if current:
+                self.preview.detach(reason)
+            log.info("Live preview disconnected (%s)", reason)
 
     def _notify(self) -> None:
         if self._on_change is not None:

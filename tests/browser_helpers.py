@@ -28,6 +28,9 @@ EDGE = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
 CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 EXTENSION_DIR = Path(__file__).resolve().parents[1] / "browser_extension"
 EXTENSION_ID = "phcdgkmcjbgdligepbkfkceejlbbmlio"
+TAB_CAPTURE_TEST_ARGS = (f"--allowlisted-extension-id={EXTENSION_ID}",)
+"""Chromium test switch: lets the automated tests start a tab capture without the click on the
+extension icon that a real user makes (the browser requires that click otherwise)."""
 
 
 def find_browser(prefer_extension_support: bool) -> Path | None:
@@ -108,7 +111,12 @@ class Session:
 
 class Browser:
     def __init__(
-        self, executable: Path, port: int, extension: bool = False, headless: bool = True
+        self,
+        executable: Path,
+        port: int,
+        extension: bool = False,
+        headless: bool = True,
+        extra_args: tuple[str, ...] = (),
     ) -> None:
         self.profile = tempfile.mkdtemp(prefix="is-test-browser-")
         args = [
@@ -124,6 +132,7 @@ class Browser:
         ]
         if extension:
             args.append(f"--load-extension={EXTENSION_DIR}")
+        args.extend(extra_args)
         self.port = port
         self.process = subprocess.Popen(
             [*args, "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL

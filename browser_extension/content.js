@@ -45,6 +45,7 @@
   document.addEventListener("play", () => report(false), true);
   document.addEventListener("pause", () => report(false), true);
   setInterval(() => report(false), 1000);
+  window.addEventListener("resize", () => report(false));
   // Shorts navigation is a single-page transition: report the new Short as soon as the URL
   // changes instead of waiting for the next periodic check.
   let lastPath = location.pathname;
