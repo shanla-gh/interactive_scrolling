@@ -107,3 +107,17 @@ def test_mailbox_never_holds_more_than_one_value_under_load() -> None:
         box.publish(i)
     assert box.take(timeout=0) == 9_999
     assert box.dropped == 9_999
+
+
+def test_two_slot_mailbox_keeps_a_burst_and_stays_bounded() -> None:
+    from interactive_scrolling.core.mailbox import LatestValueMailbox
+
+    box = LatestValueMailbox(capacity=2)
+    box.publish(1)
+    box.publish(2)  # a burst: both frames are kept
+    assert box.dropped == 0 and box.pending == 2
+    assert box.take(0) == 1  # oldest first
+    box.publish(3)
+    box.publish(4)  # full again: the oldest pending (2) is dropped, never a backlog
+    assert box.dropped == 1
+    assert [box.take(0), box.take(0), box.take(0)] == [3, 4, None]

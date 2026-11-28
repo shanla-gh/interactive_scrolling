@@ -73,6 +73,11 @@ CameraFactory = Callable[[CameraSettings], CameraSource]
 TrackerFactory = Callable[[], HandTracker]
 
 
+FRAME_BUFFER = 2
+"""Frames that may wait for processing: both frames of a camera burst are processed; a third
+evicts the oldest (``core/mailbox.py``, Brief 009)."""
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class ProcessedFrame:
     """A fully processed frame, ready for visualization."""
@@ -167,7 +172,7 @@ class VisionPipeline:
         # Re-entrant: camera-state notifications are emitted while it is held (to keep them
         # in order), so a listener that calls back into the pipeline must not deadlock.
         self._lock = threading.RLock()
-        self._mailbox: LatestValueMailbox[_SessionFrame] = LatestValueMailbox()
+        self._mailbox: LatestValueMailbox[_SessionFrame] = LatestValueMailbox(FRAME_BUFFER)
         self._shutdown = threading.Event()
         self._processing_thread: threading.Thread | None = None
         self._capture_thread: threading.Thread | None = None

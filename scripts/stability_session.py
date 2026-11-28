@@ -64,7 +64,7 @@ class WarningCollector(logging.Handler):
         self.records.append(f"{record.levelname}: {record.getMessage()}")
 
 
-def start_preview_browser(services, port: int) -> dict:  # type: ignore[no-untyped-def]
+def start_preview_browser(services, port: int, detach: bool = False) -> dict:  # type: ignore[no-untyped-def]
     """Start Edge with the extension in a thread (the UI thread must keep running) and begin
     a live preview of real YouTube Shorts. Returns a dict filled in by the thread."""
     import threading
@@ -115,6 +115,12 @@ def start_preview_browser(services, port: int) -> dict:  # type: ignore[no-untyp
             time.sleep(0.5)
             box["start"] = worker.eval(f"startPreview({tab_id})")
             box["status"] = "running"
+            if detach:
+                # Leave no DevTools reader threads in the application process: the browser
+                # keeps running and streaming, only the automation connection closes.
+                worker.close()
+                page.close()
+                box["detached"] = True
         except Exception as exc:  # reported in the session report
             box["status"] = f"failed: {exc}"
 
@@ -157,6 +163,17 @@ def main() -> int:
         action="store_true",
         help="also run a live Shorts preview: a throw-away Edge profile with the extension on "
         "real YouTube Shorts (Chromium test switch instead of the popup click; Brief 008)",
+    )
+    parser.add_argument(
+        "--frame-buffer",
+        type=int,
+        default=0,
+        help="measurement only: frames that may wait for processing (default: the app's)",
+    )
+    parser.add_argument(
+        "--preview-detach",
+        action="store_true",
+        help="with --preview: close the DevTools connections once the preview runs",
     )
     parser.add_argument(
         "--keep-timer-throttling",
@@ -202,6 +219,10 @@ def main() -> int:
         services.update_settings(
             creator=_replace(services.user_settings.creator, transparent_background=True)
         )
+    if args.frame_buffer:
+        import interactive_scrolling.core.pipeline as pipeline_module
+
+        pipeline_module.FRAME_BUFFER = args.frame_buffer
     window = MainWindow(
         settings,
         camera_factory=OpenCVCamera,
@@ -216,7 +237,7 @@ def main() -> int:
     monitor = ResourceMonitor()
     preview_box: dict = {}
     if args.preview:
-        preview_box = start_preview_browser(services, port)
+        preview_box = start_preview_browser(services, port, args.preview_detach)
 
     duration_s = args.minutes * 60
     start_ns = time.perf_counter_ns()
@@ -403,6 +424,7 @@ def main() -> int:
             "environment": environment(),
             "power_throttling_disabled": throttling_disabled,
             "timer_resolution_opt_out": not args.keep_timer_throttling,
+            "frame_buffer": args.frame_buffer or "default",
             "requested_minutes": args.minutes,
             "measured_seconds": samples[-1]["t"] if samples else 0,
             "capture_fps": summarize([s["capture_fps"] for s in running]),
