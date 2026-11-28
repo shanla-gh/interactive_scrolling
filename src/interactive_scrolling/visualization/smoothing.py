@@ -21,8 +21,11 @@ from interactive_scrolling.vision.landmarks import HandObservation, TrackingResu
 
 MIN_CUTOFF_HZ = 1.0
 """Cut-off frequency at rest: lower = smoother still hand, more lag when starting to move."""
-BETA = 0.2
-"""Speed coefficient (per hand-width of speed): higher = less lag during fast movement."""
+BETA = 0.5
+"""Speed coefficient (per hand-width of speed): higher = less lag during fast movement.
+Brief 009 (scripts/evaluate_display_smoothing.py, recordings): 0.2 -> 0.5 halved the drawn
+fingertip's lag during fast movement (median 3.5 -> 1.6 ms, p90 9.1 -> 4.5 ms) while the
+still-hand shimmer stayed almost as low (0.82 -> 0.83 of the raw frame-to-frame movement)."""
 D_CUTOFF_HZ = 1.0
 RESET_JUMP = 0.25
 """A hand that moved more than this (normalized image width) between two frames is treated
