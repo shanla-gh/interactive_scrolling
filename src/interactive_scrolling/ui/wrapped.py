@@ -66,6 +66,9 @@ class WrappedData:
     """Optional humorous or plain headline."""
     participants: tuple[tuple[str, int], ...] = ()
     """Co-op only: (participant name, successful shared actions)."""
+    eyes: tuple[float, float, float] | None = None
+    """Optional eye analytics (Brief 009): estimated screen-facing, looking-away and unknown
+    seconds. Shown only when eye analytics ran; unknown time is shown, never hidden."""
 
 
 @dataclass
@@ -240,6 +243,14 @@ def render_wrapped(data: WrappedData, humorous: bool = True) -> tuple[QImage, Ca
         line = "   ".join(f"{name}: {count}" for name, count in data.participants)
         _text(painter, layout, line, QRectF(MARGIN, y, inner, 0), 40, COOL)
         y += 70
+    if data.eyes is not None and sum(data.eyes) > 0:
+        screen_s, away_s, unknown_s = data.eyes
+        line = (
+            f"Eyes (estimated): {duration(screen_s)} facing the screen · "
+            f"{duration(away_s)} away · {duration(unknown_s)} unknown"
+        )
+        _text(painter, layout, line, QRectF(MARGIN, y, inner, 0), 30, MUTED, QFont.Weight.Medium)
+        y += 60
     if data.title:
         _text(painter, layout, f"“{data.title}”", QRectF(MARGIN, y, inner, 0), 52, INK)
     _text(
@@ -278,7 +289,7 @@ def date_text(when: datetime | None = None) -> str:
     return f"{when:%a} {when.day} {when:%b %Y}"
 
 
-def wrapped_from_report(report: DailyReport, humorous: bool) -> WrappedData:
+def wrapped_from_report(report: DailyReport, humorous: bool, eye_report=None) -> WrappedData:  # type: ignore[no-untyped-def]
     return WrappedData(
         scope="Today",
         date_text=date_text(datetime.combine(report.day, datetime.min.time())),
@@ -291,6 +302,9 @@ def wrapped_from_report(report: DailyReport, humorous: bool) -> WrappedData:
         gestures=report.gestures_total,
         index=report.index,
         title=headline(report.index, humorous),
+        eyes=(eye_report.screen_s, eye_report.away_s, eye_report.unknown_s)
+        if eye_report is not None
+        else None,
     )
 
 

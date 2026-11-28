@@ -979,7 +979,12 @@ class MainWindow(QMainWindow):
         services.refresh_reports()
         if scope == "today":
             report = services.report
-            return wrapped_from_report(report, humorous) if report is not None else None
+            eyes = (
+                services.eye_report
+                if services.user_settings.effects.eye_analytics_enabled
+                else None
+            )
+            return wrapped_from_report(report, humorous, eyes) if report is not None else None
         start, session_s = services.current_session()
         analytics = services.analytics
         if start is None or analytics is None or not analytics.enabled:

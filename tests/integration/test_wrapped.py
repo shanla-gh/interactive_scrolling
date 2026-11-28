@@ -48,6 +48,21 @@ def report(scroll_s: float = 4320, sessions: int = 3) -> DailyReport:
     )
 
 
+class _Eyes:
+    screen_s, away_s, unknown_s = 1800.0, 300.0, 420.0
+
+
+EYES = _Eyes()
+
+
+def test_eye_analytics_line_shows_unknown_time_too(qtbot) -> None:
+    shown = [t for t, _ in texts(wrapped_from_report(report(), humorous=True, eye_report=EYES))]
+    line = next(t for t in shown if t.startswith("Eyes (estimated)"))
+    assert "30 min 00 s facing the screen" in line and "7 min 00 s unknown" in line
+    plain = [t for t, _ in texts(wrapped_from_report(report(), humorous=True))]
+    assert not any(t.startswith("Eyes") for t in plain)
+
+
 def texts(data: WrappedData) -> list[tuple[str, QRectF]]:
     image, layout = render_wrapped(data)
     assert (image.width(), image.height()) == (WIDTH, HEIGHT)
@@ -61,8 +76,9 @@ def texts(data: WrappedData) -> list[tuple[str, QRectF]]:
         wrapped_from_report(report(scroll_s=0, sessions=0), humorous=False),
         wrapped_from_report(report(scroll_s=99 * 3600 + 59 * 60, sessions=12), humorous=True),
         wrapped_from_session(1500, 12, {"next_short": 9}, 60, 20, humorous=True),
+        wrapped_from_report(report(), humorous=True, eye_report=EYES),
     ],
-    ids=["typical", "empty", "huge", "session"],
+    ids=["typical", "empty", "huge", "session", "with_eyes"],
 )
 def test_layout_fits_the_card_without_overlaps(qtbot, data: WrappedData) -> None:
     boxes = texts(data)
