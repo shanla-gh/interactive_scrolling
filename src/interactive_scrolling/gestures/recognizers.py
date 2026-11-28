@@ -74,6 +74,7 @@ required value, so the user can be told exactly why a gesture was not accepted.
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections import deque
 from collections.abc import Callable
@@ -187,6 +188,23 @@ class RecognizerOptions:
     ghost_hands: bool = True
     """A second hand that appears overlapping the control hand for a moment is a duplicate
     detection of the same hand (motion blur), not a second hand (Brief 006)."""
+    flick_recovery_speed: float = 0.0
+    """Brief 009 candidate: a pending finger flick also counts as recovered as soon as the
+    fingertip moves back at this speed (palm lengths per second; 0 = off), instead of only
+    after it travelled back ``FLICK_RECOVERY_PALMS`` or the finger points again."""
+    fast_bottom_zone: float = 0.0
+    """Brief 009 experiment (rejected, kept at 0 = off): a larger bottom zone while the early
+    rules are allowed. 0.90 re-opened the Brief 005 false swipe of a hand lowered out of view."""
+    early_min_fps: float = 22.0
+    """Brief 009 (adopted): ``down_stop_fraction`` and ``fast_bottom_zone`` apply only while the
+    measured frame rate of the control hand (median of recent frame intervals) is at least this
+    (0 = always). At low frame rates speed estimates are coarse and the waits prevent duplicate
+    and reversal errors (measured at 15 fps)."""
+    down_stop_fraction: float = 0.5
+    """Brief 009 (adopted): a downward stroke that must stop inside the picture (whole hand,
+    or any stroke near the bottom edge) counts as stopped once its speed fell below this
+    fraction of its peak (0 = off: only the fixed stall speed counts). A hand being lowered out
+    of view keeps its speed until tracking is lost, so it still never confirms."""
 
     def __post_init__(self) -> None:
         if self.confirm not in ("early", "end"):
@@ -917,14 +935,16 @@ class DirectionalSwipeRecognizer:
                     stroke, d_axis, peak, elapsed, ts, sample.palm, sample.track_id
                 )
                 return Step(candidate=GestureCandidate(gesture, 1.0, elapsed))
-            leaving = gesture is GestureType.INDEX_SWIPE_DOWN and sample.lowest_y > BOTTOM_ZONE
+            leaving = (
+                gesture is GestureType.INDEX_SWIPE_DOWN and sample.lowest_y > self._bottom_zone()
+            )
             if gesture is GestureType.INDEX_SWIPE_DOWN and self.detector.down_at_stop:
                 # Confirmed once the hand stops (or after DOWN_WAIT_MAX_S) while still tracked;
                 # a hand lowered out of view is lost first and the candidate is cancelled.
                 if not stroke.qualified_ns:
                     stroke.qualified_ns = ts
                 waited = _seconds(ts - stroke.qualified_ns)
-                if v_axis >= STALL_SPEED and waited < DOWN_WAIT_MAX_S:
+                if v_axis >= self._stop_speed(peak) and waited < DOWN_WAIT_MAX_S:
                     return Step(candidate=GestureCandidate(gesture, 1.0, elapsed))
                 return self._confirm(stroke, sample, d_axis, peak, elapsed)
             if leaving and self.options.confirm != "end":
@@ -932,7 +952,7 @@ class DirectionalSwipeRecognizer:
                 # out of view (a recorded false swipe): confirm only once it stops in view.
                 if not stroke.qualified_ns:
                     stroke.qualified_ns = ts
-                if v_axis >= STALL_SPEED:
+                if v_axis >= self._stop_speed(peak):
                     if _seconds(ts - stroke.qualified_ns) >= END_WAIT_MAX_S:
                         return reject(
                             RejectCode.TOO_FAR,
@@ -1003,6 +1023,29 @@ class DirectionalSwipeRecognizer:
         progress = max(0.0, min(1.0, d_axis / distance))
         return Step(candidate=GestureCandidate(gesture, progress, elapsed))
 
+    def _early_allowed(self) -> bool:
+        """The faster downward confirmations need a frame rate where speed is well sampled."""
+        minimum = self.options.early_min_fps
+        if minimum <= 0:
+            return True
+        times = [t for t, _ in list(self._positions)[-12:]]
+        if len(times) < 6:
+            return False
+        gaps = sorted(b - a for a, b in itertools.pairwise(times))
+        return gaps[len(gaps) // 2] <= NS_PER_S / minimum
+
+    def _bottom_zone(self) -> float:
+        zone = self.options.fast_bottom_zone
+        return zone if zone > 0 and self._early_allowed() else BOTTOM_ZONE
+
+    def _stop_speed(self, peak: float) -> float:
+        """Speed below which a downward stroke counts as stopped inside the picture: the fixed
+        stall speed, or (``down_stop_fraction``) a clear slow-down from the stroke's peak."""
+        fraction = self.options.down_stop_fraction
+        if fraction > 0 and self._early_allowed():
+            return max(STALL_SPEED, fraction * peak)
+        return STALL_SPEED
+
     def _resolve_flick(self, sample: HandSample, pose_now: bool) -> Step | None:
         """Confirm a pending flick once the finger extends again, reject it if it does not."""
         flick = self._flick
@@ -1015,7 +1058,13 @@ class DirectionalSwipeRecognizer:
         back = -_dot(
             self._displacement(self._pos(sample), turn_pos, stroke.scale_px), stroke.direction
         )
-        if (pose_now or back >= FLICK_RECOVERY_PALMS) and ts > flick.qualified_ns:
+        returning = False
+        speed = self.options.flick_recovery_speed
+        if speed > 0:
+            vx, vy = self._vel_px(sample)
+            scale = stroke.scale_px
+            returning = -_dot(to_user((vx / scale, vy / scale)), stroke.direction) >= speed
+        if (pose_now or back >= FLICK_RECOVERY_PALMS or returning) and ts > flick.qualified_ns:
             self._flick = None
             stroke = flick.stroke
             stroke.qualified_ns = flick.qualified_ns
