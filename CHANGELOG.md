@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0b1] - beta (not released; Director validation pending)
+
+Engineering Brief 008: product redesign, live Shorts preview and Doomscroll Together.
+Gesture recognition is unchanged from 0.6.0b1/0.7.0b1 (regression gate: no regression in the
+five frozen configurations).
+
+### Added
+
+- **Now playing**: the Short playing in the browser, live in the app next to the webcam. Start
+  it from the extension popup ("Show this Short in the app"); only that tab's video area is
+  sent over loopback, without sound, and it disappears when the tab leaves Shorts. While the
+  preview runs and the app is the active window, Shorts gestures go to that tab.
+- **Doomscroll Together** (Co-op Lite) as a main feature: Host/Join dialogs, a copyable
+  invitation, approve/decline/remove, who did the last shared action, reconnection after a
+  dropped connection, plain-language errors, private networks only, expiring invitations,
+  rate-limited guest requests.
+- **Broadcast settings** dialog with Transparent background first, opened from More, the
+  overlay's Settings button, its menu and the tray.
+- Camera settings dialog (device, resolution, frame rate, mirror, camera-view layers).
+- Collapsible Activity & diagnostics console (history, log, recognition, performance,
+  browser/preview/Together details).
+
+### Changed
+
+- Normal Mode (formerly Developer Mode) redesigned: minimal top bar, camera and Now playing in
+  the centre, Browser / Doomscroll Together / Today on the right, diagnostics at the bottom;
+  no side tabs; new restrained theme; hand box and label off by default.
+- Gesture control is a compact Off / Test / Live strip with Stop under the camera.
+- Clown effect redesigned as makeup: red nose, red lip colour, light translucent feathered
+  white base with adjustable strength; no wig, eye shapes or opaque mask.
+- Browser extension 0.5.0 (protocol 3): new permissions `tabCapture` and `offscreen` (reload
+  the extension once).
+- Windows: the process also opts out of timer-resolution throttling while no window is visible
+  (Background Mode).
+
 ## [0.7.0b1] - beta (not released; Director validation pending)
 
 Engineering Brief 007: product experience and Broadcast Mode. Gesture recognition is

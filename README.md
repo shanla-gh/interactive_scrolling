@@ -29,20 +29,25 @@ Calibration** ([guide](docs/guides/CALIBRATION_GUIDE.md)) adapts it to your move
 Every action is confirmed from the page and reported as succeeded, no change, rejected, failed
 or unknown.
 
-**Three UI modes**: *Developer Mode* (dashboard with skeleton, vectors, diagnostics, history,
-reports), *Broadcast Mode* (compact always-on-top overlay for OBS, optional
-**transparent background**), *Background Mode* (tray icon that always shows the camera and
-control state).
+**Normal Mode**: your camera with the hand skeleton next to **Now playing** - the Short from
+your browser, live in the app (started from the extension popup; only that tab's video area,
+locally, without sound) - with the browser connection, **Doomscroll Together** and today's
+summary on the right and a collapsible diagnostics console at the bottom.
+**Broadcast Mode**: compact always-on-top overlay for OBS with **Broadcast settings**
+(transparent background, layers, clown). **Background Mode**: tray icon that always shows the
+camera and control state.
 
 **Wellbeing and reports** (local only, can be switched off and deleted): today's scrolling
 time, sessions, longest session, actions, gestures, a transparent **Doomscroll Index**,
 optional Reality Checks, limits and a reversible pause of gesture scrolling; a Gesture
 Performance Report.
 
-**Fun**: the **Progressive Clown Transformation** (red nose -> makeup -> full clown as a
-scrolling session goes on), optional **passive eye analytics** (estimated screen-facing /
-looking-away time, blinks; never used for control), **Doomscroll Wrapped** (1080x1920 PNG
-summary for stories), **Co-op Doomscroll** (two people on the same network control one feed).
+**Fun**: the **Progressive Clown Transformation** (red nose -> red lips -> light white makeup
+as a scrolling session goes on; your face stays visible), optional **passive eye analytics**
+(estimated screen-facing / looking-away time, blinks; never used for control), **Doomscroll
+Wrapped** (1080x1920 PNG summary for stories), **Doomscroll Together** (two people, one feed:
+both swipe, the Host's browser plays, you watch through Discord; same Wi-Fi or a private VPN -
+see [the guide](docs/guides/DOOMSCROLL_TOGETHER.md)).
 
 ## Install (from source)
 
@@ -62,17 +67,20 @@ after that everything works offline. A packaged build is described in
 
 ### Browser extension
 
-1. In the app's **Browser** tab, copy the pairing code.
+1. In the app: **Browser -> Setup and pairing**, copy the pairing code.
 2. `edge://extensions` (or `chrome://extensions`) -> *Developer mode* -> *Load unpacked* ->
-   select the `browser_extension` folder. (Updating from 0.2: press *Reload* on its card.)
+   select the `browser_extension` folder. (After an update: press *Reload* on its card;
+   0.8.0b1 needs this once for the live preview permissions.)
 3. Click the extension icon, paste the code, *Save and connect*.
 
 ## Use
 
-1. **Start camera**, choose **Gesture test**, practise the gestures (nothing is executed).
-2. Open a YouTube Shorts tab, choose **Live control**.
-3. Optional: *Broadcast Mode*, *To tray*, *Today* tab (reports, limits, Wrapped, face
-   effects), *Co-op* tab.
+1. **Start camera**, choose **Test** under the camera, practise the gestures (nothing is
+   executed).
+2. Open a YouTube Short, optionally click the extension icon -> *Show this Short in the app*,
+   then choose **Live**.
+3. Optional: *Broadcast*, *More* (Background Mode, Broadcast settings, reports, face effects),
+   *Doomscroll Together*.
 
 A step-by-step guide with every feature is the
 [Director acceptance checklist](docs/milestones/DIRECTOR_ACCEPTANCE_CHECKLIST.md).
@@ -84,9 +92,12 @@ A step-by-step guide with every feature is the
 * The browser extension reads only YouTube pages; tab switching uses tab positions, never
   titles or URLs.
 * Statistics contain event categories and durations only (no URLs, titles, video ids, faces or
-  landmarks); eye analytics store daily totals only. Switch off and delete in the *Today* tab.
+  landmarks); eye analytics store daily totals only. Switch off and delete in *Today -> Report*.
+* The live preview sends only the video area of the one tab you chose, only to the app on this
+  computer, and nothing is stored.
 * No face identification; face landmarks are used only for the clown effect and eye estimates.
-* Co-op sends only small signed control events (next, previous, pause) on your own network.
+* Doomscroll Together sends only small signed control events (next, previous, pause) over
+  your own private network; no video, camera or browsing data.
 
 ## Development
 

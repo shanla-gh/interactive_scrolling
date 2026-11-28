@@ -53,3 +53,26 @@ the top bar keeps showing a reason:
 Every gesture result in the history and on the video says whether the gesture was **not
 recognized** (the "Why not recognized" line) or **recognized but the browser action was
 rejected or failed** (the outcome column), so the two are never confused.
+
+## Live preview in the app (0.8.0b1, extension 0.5.0)
+
+After updating, open `edge://extensions` (or `chrome://extensions`) and press **Reload** on
+Interactive Scrolling Bridge once: version 0.5.0 asks for two new permissions, `tabCapture`
+(capture the one tab you choose) and `offscreen` (a hidden page that does the capture). For an
+unpacked extension the browser grants them on reload without a prompt.
+
+1. Open a YouTube Short in the browser.
+2. Click the Interactive Scrolling extension icon and choose **Show this Short in the app**.
+   The browser requires this click before any tab can be captured, and shows its own "this tab
+   is being shared" indicator on the tab.
+3. The Short appears under **Now playing** in the app. Only the video area of that one tab is
+   sent, only to the app on this computer, without sound (the tab keeps playing its sound).
+4. Stop it with **Stop the preview** in the popup, **Stop preview** in the app's Browser
+   section, by closing the tab, or by hiding Now playing (More -> Show Now playing).
+
+While the preview runs and the app is the active window, your Shorts gestures go to that tab
+(you do not need to switch back to the browser). Switching tabs still needs the browser in
+front. If the tab leaves Shorts, the picture disappears until it shows a Short again.
+
+Tested automatically with Microsoft Edge (real YouTube and a local fixture page). Google Chrome
+implements the same APIs but was not tested here.

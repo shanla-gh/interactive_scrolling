@@ -1,6 +1,6 @@
 # Broadcast Mode: recording YouTube Shorts with your camera overlay
 
-Broadcast Mode replaces the dashboard with a small, always-on-top camera window that you
+Broadcast Mode replaces the main window with a small, always-on-top camera window that you
 place over the browser. It is a view only: it does not change gesture control, never takes
 the keyboard focus from the browser, and the camera, models and statistics keep running.
 
@@ -8,37 +8,48 @@ the keyboard focus from the browser, and the camera, models and statistics keep 
 
 1. Start Interactive Scrolling and press **Start camera**.
 2. Connect YouTube Shorts (see [BROWSER_EXTENSION_GUIDE.md](BROWSER_EXTENSION_GUIDE.md)); the
-   top bar shows **Browser: Shorts ready**.
-3. Choose **Live control** if gestures should act on the browser (the overlay shows
+   Browser section shows **Connected - Shorts ready**.
+3. Choose **Live** under your camera if gestures should act on the browser (the overlay shows
    **GESTURES OFF**, **GESTURE TEST** or **LIVE CONTROL** in its top-left corner).
-4. Press **Broadcast Mode**. The dashboard hides; the overlay appears in the bottom-right corner.
+4. Press **Broadcast** in the top bar. The main window hides; the overlay appears in the
+   bottom-right corner.
 5. Position it: drag it anywhere, drag its bottom-right corner to resize (16:9 is kept), or
    right-click -> **Position** for a corner of the screen it is on. A saved position that is no
    longer on any screen (monitor removed, scaling changed) is replaced by the bottom-right
    corner of the primary screen.
-6. Optional: right-click -> **Transparent background** (removes the room around you; see below).
+6. Optional: open **Broadcast settings** - move the mouse over the overlay and click
+   **Settings** (top right; it is visible only while the mouse is over the overlay, so move the
+   mouse away before recording), or right-click the overlay, or use the tray icon, or **More ->
+   Broadcast settings** in the main window. **Transparent background** is the first option.
 7. In OBS add **Display Capture** of the screen with the browser and the overlay, and record.
-8. Back to the dashboard: double-click the overlay or right-click -> **Developer Mode**.
+8. Back to the main window: double-click the overlay, right-click -> **Normal Mode**, or the
+   tray icon.
 
 Clicking or dragging the overlay leaves the browser the active window: you can keep using
 YouTube with mouse and keyboard. To stop gesture control at once press the global shortcut
-(shown in the dashboard) or use the tray icon -> **Stop gesture control**.
+(shown next to **Stop** under the camera) or use the tray icon -> **Stop gesture control**.
 
-## Overlay layers (right-click)
+## Broadcast settings (Brief 008)
+
+One dialog with every overlay option; changes apply at once and are remembered:
+**Transparent background**, the layers below, the **Clown effect** (on/off, white makeup
+strength 10-70 %, preview of a stage), **Opacity**, **Size** and **Position**.
 
 | Layer | Default | Notes |
 |---|---|---|
 | Hand skeleton | on | drawn with display-only smoothing (still-hand shimmer about 30 % lower on the recordings; recognition uses the raw landmarks) |
 | Motion trails | on | the measured fingertip trail |
 | Motion vectors | off | the measured velocity |
-| Last gesture, Action outcome | on | "Success" appears only when the browser confirmed the action |
+| Last gesture, Action result | on | "Success" appears only when the browser confirmed the action; in Doomscroll Together the result names who did it |
 | Session timer and counters | off | session time and today's executed actions |
 | Gesture control status | on | off / test / live control |
 | Smooth skeleton (display only) | on | |
 | Transparent background | off | |
 | Opacity, Size, Position | | |
 
-The clown effect, when switched on in the dashboard, is drawn on the overlay as well.
+The clown effect (Broadcast settings) is drawn on the overlay as well: a red nose, then red
+lip colour, then light translucent white makeup - your own face, eyes, eyebrows and hair stay
+visible (Brief 008).
 
 ## Transparent background
 

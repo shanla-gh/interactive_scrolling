@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "interactive-scrolling"
-version = "0.7.0b1"
+version = "0.8.0b1"
 description = "Local, webcam-based hand tracking and gesture interaction for the desktop."
 readme = "README.md"
 license = "MIT"
