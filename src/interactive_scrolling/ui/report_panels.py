@@ -55,12 +55,12 @@ class DailyReportPanel(Card):
         )
         self.longest = self.add_row("Longest session")
         self.current = self.add_row("Current session")
-        self.add_heading("ACTIONS DONE (CONFIRMED)")
+        self.add_heading("Actions done (confirmed)")
         self.navigation = self.add_row("Next / previous Short")
         self.tabs = self.add_row("Tab right / left")
         self.likes = self.add_row("Likes (half-heart)")
         self.playback = self.add_row("Pause / resume")
-        self.add_heading("GESTURES RECOGNIZED")
+        self.add_heading("Gestures recognized")
         self.gestures = self.add_row(
             "Confirmed gestures",
             "Every recognized gesture, executed or not (test mode, rejected, failed).",
@@ -163,11 +163,11 @@ class PerformancePanel(Card):
             accent=True,
         )
         self.latency = self.add_row("Action latency", "Dispatch to confirmation (successful).")
-        self.add_heading("LIVE")
+        self.add_heading("Live")
         self.fps = self.add_row("Tracking FPS")
         self.processing = self.add_row("Capture-to-result latency")
         self.recognition = self.add_row("Gesture recognition time")
-        self.add_heading("GESTURE DISTRIBUTION")
+        self.add_heading("Gesture distribution")
         self.distribution = QLabel(NO_DATA)
         self.distribution.setWordWrap(True)
         self.distribution.setObjectName("rowValue")

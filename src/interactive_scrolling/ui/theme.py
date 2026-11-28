@@ -19,9 +19,9 @@ from __future__ import annotations
 import weakref
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QObject, QTimer
-from PySide6.QtGui import QColor, QFont, QPalette
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QPainter, QPalette
+from PySide6.QtWidgets import QApplication, QLabel, QSizePolicy, QWidget
 from shiboken6 import isValid
 
 UI_FONT_FAMILIES = ["Segoe UI Variable Text", "Segoe UI", "Inter", "Arial"]
@@ -300,6 +300,10 @@ QComboBox:focus, QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
     border-color: {t.focus};
 }}
 QComboBox {{ min-width: 70px; }}
+QAbstractSpinBox {{ padding-right: 8px; }}
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{
+    width: 0; border: none; background: transparent;
+}}
 QComboBox QAbstractItemView {{
     background-color: {t.raised}; color: {t.text}; border: 1px solid {t.border};
     selection-background-color: {t.selected}; selection-color: {t.text};
@@ -381,6 +385,29 @@ QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QDialog {{ background-color: {t.bg}; }}
 """
+
+
+class ElidedLabel(QLabel):
+    """A one-line label that ends in an ellipsis instead of clipping or widening its row."""
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        painter = QPainter(self)
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        text = self.fontMetrics().elidedText(
+            self.text(), Qt.TextElideMode.ElideRight, self.contentsRect().width()
+        )
+        painter.drawText(self.contentsRect(), int(self.alignment()), text)
+        painter.end()
+
+    def setText(self, text: str) -> None:  # type: ignore[override]
+        if text != self.text():
+            super().setText(text)
+            self.setToolTip(text)
 
 
 def mono_font(point_size: float = 9.0, bold: bool = False) -> QFont:

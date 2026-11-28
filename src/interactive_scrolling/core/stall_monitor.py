@@ -44,6 +44,9 @@ class Stall:
     worker_gaps_ms: dict[str, float] = field(default_factory=dict)
     context: str = ""
     """Extra attribution from ``context_provider`` (e.g. the Qt event being processed)."""
+    watchdog_late_ms: float = 0.0
+    """How late the watchdog thread's own 10 ms waits came during the stall. Close to the
+    stall's duration: the whole process (or machine) paused, not only the UI thread."""
 
     def summary(self) -> str:
         where = self.section or "outside application handlers"
@@ -208,13 +211,24 @@ class StallMonitor:
                     context = self.context_provider()
             frame = sys._current_frames().get(self._ui_thread_id)
             stack = tuple(traceback.format_stack(frame)[-8:]) if frame is not None else ()
-            while not self._stop.wait(self._poll_s) and self._last_beat == beat:
-                pass
+            late_ns = 0
+            while True:
+                before = self._clock()
+                if self._stop.wait(self._poll_s) or self._last_beat != beat:
+                    break
+                late_ns = max(late_ns, self._clock() - before - int(self._poll_s * 1e9))
             end = self._last_beat if self._last_beat != beat else self._clock()
             duration = (end - beat) / NS_PER_MS
             workers = self._worker_overlap_ms(beat, end)
             stall = Stall(
-                beat, duration, section, stack, self._gc_overlap_ms(beat, end), workers, context
+                beat,
+                duration,
+                section,
+                stack,
+                self._gc_overlap_ms(beat, end),
+                workers,
+                context,
+                late_ns / NS_PER_MS,
             )
             self.stalls.append(stall)
             self.stall_count += 1

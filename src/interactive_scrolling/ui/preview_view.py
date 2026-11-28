@@ -8,6 +8,8 @@ tab left Shorts. Without a preview the widget explains in one sentence how to st
 
 from __future__ import annotations
 
+import contextlib
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
@@ -32,7 +34,7 @@ class PreviewView(QWidget):
         super().__init__(parent)
         self.feed = feed
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(150, 260)
+        self.setMinimumSize(90, 160)
         self.image: QImage | None = None
         self._number: int | None = None
         self.status: PreviewStatus | None = None
@@ -107,7 +109,14 @@ class PreviewView(QWidget):
             pw, ph = float(w), w / SHORTS_ASPECT
         return QRectF((w - pw) / 2, (h - ph) / 2, pw, ph)
 
+    section = staticmethod(lambda name: contextlib.nullcontext())
+    """Timing hook (the window sets it to ``StallMonitor.section``)."""
+
     def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        with self.section("preview paint"):
+            self._paint()
+
+    def _paint(self) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)

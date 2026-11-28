@@ -362,3 +362,75 @@ def test_version_4_swipe_styles_become_any_hand_shape_with_a_notice(
     again = SettingsStore(path)
     again.load()
     assert MOTION_STYLE_NOTICE not in again.migrations
+
+
+# ---------------------------------------------------------------- Brief 010: workspace and themes
+
+
+def test_brief_009_settings_migrate_to_the_cinema_workspace(tmp_path: Path) -> None:
+    """A 0.9.0b1 file (no theme, the removed Now playing toggle) keeps the user's choices and
+    gets the documented defaults for the new options."""
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": SETTINGS_VERSION,
+                "pairing_token": "x" * 32,
+                "appearance": {"console_expanded": True, "show_now_playing": False},
+                "creator": {"transparent_background": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SettingsStore(path).load()
+    a = settings.appearance
+    assert a.theme == "black"  # the existing dark look
+    assert a.console_expanded is True  # kept
+    assert a.session_panel_expanded is True and a.focus_view is False
+    assert a.left_panel_width == 0 and a.session_panel_width == 0
+    assert settings.creator.transparent_background is True
+    assert settings.together.player_name == "" and settings.together.host_port == 47816
+
+
+def test_workspace_settings_round_trip(tmp_path: Path) -> None:
+    from interactive_scrolling.config.settings import TogetherSettings
+
+    store = SettingsStore(tmp_path / "settings.json")
+    settings = store.load()
+    appearance = replace(
+        settings.appearance,
+        theme="gray",
+        session_panel_expanded=False,
+        left_panel_width=420,
+        session_panel_width=330,
+        focus_view=True,
+    )
+    together = TogetherSettings(player_name="Robin", host_port=48000)
+    assert store.save(replace(settings, appearance=appearance, together=together))
+    again = SettingsStore(tmp_path / "settings.json").load()
+    assert again.appearance == appearance and again.together == together
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("appearance", "theme", "purple"),
+        ("appearance", "left_panel_width", -5),
+        ("appearance", "session_panel_width", "wide"),
+        ("together", "host_port", 80),
+        ("together", "player_name", "x" * 40),
+    ],
+)
+def test_invalid_workspace_values_fall_back_to_defaults(
+    tmp_path: Path, section: str, field: str, value: object
+) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {"version": SETTINGS_VERSION, "pairing_token": "x" * 32, section: {field: value}}
+        ),
+        encoding="utf-8",
+    )
+    settings = SettingsStore(path).load()
+    default = getattr(getattr(UserSettings(), section), field)
+    assert getattr(getattr(settings, section), field) == default

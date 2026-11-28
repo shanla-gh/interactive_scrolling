@@ -345,3 +345,36 @@ def test_session_panel_states_without_a_browser(qtbot) -> None:
     assert window.preview.message().startswith("Your browser is not connected")
     assert window.preview_info.text() == "Browser not connected"
     assert window.session_panel.today.values["shorts"].text() in ("—", "0")
+
+
+def test_feedback_waits_for_the_browser_before_success(qtbot) -> None:
+    from interactive_scrolling.actions.types import ActionRecord, ActionStatus, ActionType
+    from interactive_scrolling.gestures.types import GestureEvent, GestureType, Handedness
+
+    window = make_window(qtbot)
+    event = GestureEvent(GestureType.INDEX_SWIPE_UP, 0, 1, Handedness.RIGHT, detector="finger")
+    pending = ActionRecord(
+        "r1", event, ActionType.NEXT_SHORT, ControlMode.LIVE_CONTROL, ActionStatus.DISPATCHED
+    )
+    window.control_bar.show_record(pending)
+    outcome = window.control_bar.feedback_labels["outcome"]
+    assert outcome.text() == "Waiting for the browser..."
+    done = ActionRecord(
+        "r1", event, ActionType.NEXT_SHORT, ControlMode.LIVE_CONTROL, ActionStatus.SUCCEEDED
+    )
+    window.control_bar.show_record(done)
+    assert outcome.text() == "Successful" and outcome.property("state") == "ok"
+
+
+def test_collapsed_console_skips_detail_panel_updates(qtbot) -> None:
+    window = make_window(qtbot)
+    calls: list[object] = []
+    window.tracking_panel.update_tracking = lambda t: calls.append(t)  # type: ignore[method-assign]
+    window.console.set_expanded(False)
+    window.start_camera()
+    qtbot.waitUntil(lambda: window.video.frame is not None, timeout=5000)
+    qtbot.wait(200)
+    assert calls == []
+    window.console.set_expanded(True)
+    qtbot.waitUntil(lambda: len(calls) > 0, timeout=3000)
+    window.stop_camera()

@@ -143,6 +143,9 @@ def test_live_control_executes_and_reports_confirmed_outcome(qtbot, tmp_path) ->
     )
     assert controller.executed[0] is ActionType.NEXT_SHORT
     assert "succeeded" in window.control_bar.last_chip.text()
+    # Brief 010 feedback block: recognized gesture, requested action, verified outcome.
+    assert window.control_bar.feedback_labels["outcome"].text() == "Successful"
+    assert window.control_bar.feedback_labels["action"].text() != "—"
     assert window.control_bar.property("live") is True
 
 

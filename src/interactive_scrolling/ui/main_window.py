@@ -81,7 +81,7 @@ from interactive_scrolling.ui.session_panel import (
     short_duration,
 )
 from interactive_scrolling.ui.settings_window import CameraSettingsForm, SettingsWindow
-from interactive_scrolling.ui.theme import repolish
+from interactive_scrolling.ui.theme import ElidedLabel, repolish
 from interactive_scrolling.ui.together import TogetherPanel
 from interactive_scrolling.ui.tray import TrayController
 from interactive_scrolling.ui.video_view import VideoView
@@ -288,6 +288,7 @@ class MainWindow(QMainWindow):
         self.scan_button.clicked.connect(self._scan_cameras)
         feed = self._preview_feed()
         self.preview = PreviewView(feed)
+        self.preview.section = self.stall_monitor.section  # type: ignore[method-assign]
         appearance = user.appearance
         self.session_panel = SessionPanel(self.coop_panel, appearance.session_panel_expanded)
         self.session_panel.expanded_changed.connect(self._session_panel_toggled)
@@ -501,7 +502,7 @@ class MainWindow(QMainWindow):
         self.left_scroll.setMinimumWidth(LEFT_MIN_WIDTH)
         self.left_scroll.setMaximumWidth(LEFT_MAX_WIDTH)
         self._left_panel = left
-        left.installEventFilter(self)
+        self.video.installEventFilter(self)
 
         # ---- centre: the live Short
         cinema = QWidget()
@@ -514,10 +515,9 @@ class MainWindow(QMainWindow):
         self.preview_dot = QLabel("●")
         self.preview_dot.setObjectName("statusDot")
         row.addWidget(self.preview_dot)
-        self.preview_info = QLabel("")
+        self.preview_info = ElidedLabel("")
         self.preview_info.setObjectName("hint")
-        row.addWidget(self.preview_info)
-        row.addStretch(1)
+        row.addWidget(self.preview_info, 1)
         self.focus_button = QPushButton("Focus view")
         self.focus_button.setObjectName("flatButton")
         self.focus_button.setCheckable(True)
@@ -547,7 +547,7 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
         # The camera keeps its picture's shape at the width of the left panel.
-        if watched is getattr(self, "_left_panel", None) and event.type() == QEvent.Type.Resize:
+        if watched is self.video and event.type() == QEvent.Type.Resize:
             self._fit_camera()
         return super().eventFilter(watched, event)
 
@@ -571,8 +571,7 @@ class MainWindow(QMainWindow):
         left = getattr(self, "_left_panel", None)
         if left is None:
             return
-        margins = left.layout().contentsMargins()
-        width = max(200, left.width() - margins.left() - margins.right())
+        width = max(200, self.video.width())
         height = round(width / self._camera_aspect())
         if self.video.height() != height:
             self.video.setFixedHeight(max(150, height))
@@ -580,9 +579,14 @@ class MainWindow(QMainWindow):
 
     def _apply_panel_widths(self) -> None:
         a = self.services.user_settings.appearance
-        left = min(LEFT_MAX_WIDTH, max(LEFT_MIN_WIDTH, a.left_panel_width or LEFT_DEFAULT_WIDTH))
+        width = max(1, self.workspace.width())
+        # Default widths shrink with narrow windows so the Short keeps the centre (a laptop at
+        # 150 %); widths the user dragged are kept as they are.
+        left_default = min(LEFT_DEFAULT_WIDTH, int(width * 0.27))
+        right_default = min(SESSION_DEFAULT_WIDTH, int(width * 0.26))
+        left = min(LEFT_MAX_WIDTH, max(LEFT_MIN_WIDTH, a.left_panel_width or left_default))
         if self.session_panel.expanded:
-            right = a.session_panel_width or SESSION_DEFAULT_WIDTH
+            right = a.session_panel_width or right_default
             right = min(SESSION_MAX_WIDTH, max(SESSION_MIN_WIDTH, right))
         else:
             right = STRIP_WIDTH
@@ -704,11 +708,12 @@ class MainWindow(QMainWindow):
         self.dropped_label = QLabel()
         self.resources_label = QLabel()
         self.stalls_label = QLabel()
+        # In order of importance: narrow windows drop the last figures first.
         labels = [
             (self.capture_fps_label, "Frames per second delivered by the camera"),
-            (self.processing_fps_label, "Frames per second through inference and motion analysis"),
             (self.latency_label, "Capture-to-result processing latency: mean / 95th percentile"),
             (self.resources_label, "Process CPU (share of all logical cores) and resident memory"),
+            (self.processing_fps_label, "Frames per second through inference and motion analysis"),
             (self.display_fps_label, "Frames per second painted on screen"),
             (self.dropped_label, "Outdated frames skipped so latency cannot accumulate"),
             (
@@ -759,6 +764,11 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         # Narrow windows (a laptop at 150 %): the version label gives way first.
         self.version_label.setVisible(self.width() >= 1100)
+        # The expanded console takes at most about a third of a short window.
+        self.console.set_expanded_height(max(150, min(260, int(self.height() * 0.33))))
+        a = self.services.user_settings.appearance
+        if not a.left_panel_width or not a.session_panel_width:
+            QTimer.singleShot(0, self._apply_panel_widths)
 
     def showEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         super().showEvent(event)
@@ -1003,6 +1013,7 @@ class MainWindow(QMainWindow):
     def _on_record(self, record: ActionRecord) -> None:
         first = self.history.outcome_of(record.record_id) is None
         self.history.update_record(record)
+        self.control_bar.show_record(record)
         self.gesture_panel.show_record(record)
         self.creator.show_record(record)
         if first:
@@ -1565,6 +1576,7 @@ class MainWindow(QMainWindow):
                 f"CPU {sample.cpu_percent_of_machine:4.1f}%  RAM {sample.rss_mb:.0f} MB"
             )
         self.resources_label.setText(self._last_resource_text)
+        self.console.fit_summary()
         self._show_hand_state(live)
         if self.console.showing:
             self.performance_panel.show_live(m, self.pipeline.gesture_ms_mean if live else None)

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -68,6 +69,7 @@ class DiagnosticsConsole(QFrame):
         self.toggle.setObjectName("flatButton")
         self.toggle.clicked.connect(lambda: self.set_expanded(not self.expanded))
         header.addWidget(self.toggle)
+        self.stat_labels = list(stat_labels)
         stats = QWidget()
         stats.setObjectName("consoleStats")
         stats_layout = QHBoxLayout(stats)
@@ -76,6 +78,9 @@ class DiagnosticsConsole(QFrame):
         for label in stat_labels:
             stats_layout.addWidget(label)
         stats_layout.addStretch(1)
+        stats.setMinimumWidth(0)
+        stats.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.stats = stats
         header.addWidget(stats, 1)
         self.copy_button = QPushButton("Copy diagnostics")
         self.copy_button.setObjectName("flatButton")
@@ -120,9 +125,35 @@ class DiagnosticsConsole(QFrame):
             if expanded
             else "Show gesture history, log, recognition, performance and connection details"
         )
-        self.setFixedHeight(EXPANDED_HEIGHT if expanded else self.sizeHint().height())
+        self.setFixedHeight(self.expanded_height if expanded else self.sizeHint().height())
         if notify:
             self.expanded_changed.emit(expanded)
+
+    expanded_height = EXPANDED_HEIGHT
+
+    def set_expanded_height(self, height: int) -> None:
+        if height != self.expanded_height:
+            self.expanded_height = height
+            if self.expanded:
+                self.setFixedHeight(height)
+
+    def fit_summary(self) -> None:
+        """Show as many summary figures as fit, in order of importance (narrow windows drop
+        the last ones instead of clipping text)."""
+        available = self.stats.width()
+        used = 0
+        spacing = self.stats.layout().spacing()
+        for label in self.stat_labels:
+            need = label.sizeHint().width() + spacing
+            fits = used + need <= available
+            if label.isVisibleTo(self.stats) != fits:
+                label.setVisible(fits)
+            if fits:
+                used += need
+
+    def resizeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        super().resizeEvent(event)
+        self.fit_summary()
 
     @property
     def showing(self) -> bool:

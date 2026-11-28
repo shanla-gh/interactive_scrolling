@@ -274,8 +274,9 @@ def main() -> int:
     shot(window, "04_focus_view")
     window.set_focus_view(False)
     window.console.set_expanded(True)
-    for index, tab in enumerate(("activity", "recognition", "camera", "performance", "eyes",
-                                 "browser")):
+    for index, tab in enumerate(
+        ("activity", "recognition", "camera", "performance", "eyes", "browser")
+    ):
         if index >= window.console.tabs.count():
             break
         window.console.tabs.setCurrentIndex(index)
@@ -404,8 +405,13 @@ def finish(app, window, stream) -> None:  # type: ignore[no-untyped-def]
     window.close()
     pump(app, 0.5)
     screen = QGuiApplication.primaryScreen()
-    print("screen", screen.geometry().width(), screen.geometry().height(),
-          "dpr", screen.devicePixelRatio())
+    print(
+        "screen",
+        screen.geometry().width(),
+        screen.geometry().height(),
+        "dpr",
+        screen.devicePixelRatio(),
+    )
     QTimer.singleShot(0, app.quit)
 
 

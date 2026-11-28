@@ -24,7 +24,7 @@ class Card(QFrame):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(14, 12, 14, 14)
         self._layout.setSpacing(8)
-        heading = QLabel(title.upper())
+        heading = QLabel(title)
         heading.setObjectName("cardTitle")
         self._layout.addWidget(heading)
         self._grid: QGridLayout | None = None

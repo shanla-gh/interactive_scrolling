@@ -176,6 +176,22 @@ def main() -> int:
         help="with --preview: close the DevTools connections once the preview runs",
     )
     parser.add_argument(
+        "--eye-overlay",
+        action="store_true",
+        help="with --optional-models: also show the eye and gaze overlay (Brief 010)",
+    )
+    parser.add_argument(
+        "--steady",
+        action="store_true",
+        help="ordinary use: no camera restarts, window resizes or option toggles (Brief 010)",
+    )
+    parser.add_argument(
+        "--pause-probe",
+        action="store_true",
+        help="run scripts/pause_probe.py in a separate process and mark stalls that coincide "
+        "with a machine-wide pause (Brief 010)",
+    )
+    parser.add_argument(
         "--keep-timer-throttling",
         action="store_true",
         help="measurement only: do not opt out of Windows ignoring timer resolution while no "
@@ -211,7 +227,11 @@ def main() -> int:
         }
         from dataclasses import replace as _replace
 
-        effects = _replace(services.user_settings.effects, eye_analytics_enabled=True)
+        effects = _replace(
+            services.user_settings.effects,
+            eye_analytics_enabled=True,
+            eye_overlay=args.eye_overlay,
+        )
         services.update_settings(effects=effects)
     if args.transparent:
         from dataclasses import replace as _replace
@@ -240,7 +260,24 @@ def main() -> int:
         preview_box = start_preview_browser(services, port, args.preview_detach)
 
     duration_s = args.minutes * 60
+    probe_path = None
+    probe_process = None
+    if args.pause_probe:
+        import subprocess
+
+        probe_path = Path(tempfile.mkdtemp(prefix="is-pauses-")) / "pauses.json"
+        probe_process = subprocess.Popen(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parent / "pause_probe.py"),
+                "--seconds",
+                str(duration_s + 60),
+                "--output",
+                str(probe_path),
+            ]
+        )
     start_ns = time.perf_counter_ns()
+    start_wall = time.time()
     samples: list[dict] = []
     heartbeat_lateness: list[float] = []
     restarts: list[dict] = []
@@ -332,7 +369,7 @@ def main() -> int:
                 restarts.append({k: v for k, v in pending.items() if k not in ("t0", "t1")})
                 state["restart_pending"] = None
                 window.start_camera()
-        elif time.perf_counter() - state["last_restart"] >= args.restart_every:
+        elif not args.steady and time.perf_counter() - state["last_restart"] >= args.restart_every:
             state["last_restart"] = time.perf_counter()
             state["restart_pending"] = {
                 "at_s": round(elapsed, 1),
@@ -356,11 +393,13 @@ def main() -> int:
             )
         if state["tick"] > 3:
             check_invariants(elapsed)
-        if state["tick"] % 30 == 0 and window.isVisible():
+        if args.steady:
+            pass
+        elif state["tick"] % 30 == 0 and window.isVisible():
             window.resize(*SIZES[(state["tick"] // 30) % len(SIZES)])
-        if state["tick"] % 45 == 0:
+        if state["tick"] % 45 == 0 and not args.steady:
             window.overlay_panel.mirror.toggle()
-        if state["tick"] % 20 == 0:
+        if state["tick"] % 20 == 0 and not args.steady:
             box = window.overlay_panel.checkboxes["show_palm_trail"]
             box.toggle()
 
@@ -435,6 +474,8 @@ def main() -> int:
             "control_mode": mode.value,
             "ui_mode": args.ui_mode,
             "optional_models": args.optional_models,
+            "steady": args.steady,
+            "eye_overlay": args.eye_overlay,
             "transparent": args.transparent,
             "mode_transitions": len(transitions),
             "mode_transition_ms": summarize([t["ms"] for t in transitions]),
@@ -465,6 +506,8 @@ def main() -> int:
                     "ui_stack_top": [line.strip() for line in st.ui_stack[-3:]],
                     "qt": st.context,
                     "at_s": round((st.started_ns - start_ns) / 1e9, 1),
+                    "wall": round(start_wall + (st.started_ns - start_ns) / 1e9, 3),
+                    "watchdog_late_ms": round(st.watchdog_late_ms, 1),
                 }
                 for st in window.stall_monitor.stalls
             ],
@@ -480,6 +523,29 @@ def main() -> int:
             "samples": samples,
         }
     )
+    if probe_process is not None and probe_path is not None:
+        probe_process.terminate()
+        probe_process.wait(timeout=10)
+        pauses = []
+        if probe_path.exists():
+            try:
+                pauses = json.loads(probe_path.read_text("utf-8")).get("pauses", [])
+            except ValueError:
+                pauses = []
+        report["machine_pauses"] = {
+            "count": len(pauses),
+            "max_ms": max((p["late_ms"] for p in pauses), default=0.0),
+            "items": pauses[-200:],
+        }
+        for stall in report.get("ui_stalls", []):
+            start = stall["wall"] - 0.05
+            stop = stall["wall"] + stall["duration_ms"] / 1000 + 0.05
+            overlapping = [
+                p["late_ms"]
+                for p in pauses
+                if p["wall"] - p["late_ms"] / 1000 <= stop and p["wall"] >= start
+            ]
+            stall["machine_pause_ms"] = max(overlapping, default=0.0)
     text = json.dumps(report, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

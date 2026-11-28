@@ -60,6 +60,8 @@ class VideoView(QWidget):
     def set_minimal(self, minimal: bool) -> None:
         self.minimal = minimal
         if minimal:
+            # A panel in the cinema workspace: the window sizes it to the picture's shape.
+            self.setMinimumSize(160, 90)
             ui = QFont()
             ui.setFamilies(UI_FONT_FAMILIES)
             ui.setPointSizeF(13)
@@ -331,9 +333,17 @@ class VideoView(QWidget):
                 self._banner = None
             else:
                 alpha = 1.0 if age < 0.8 else max(0.0, 1 - (age - 0.8) / (self.BANNER_S - 0.8))
-                painter.setFont(self._banner_font)
+                font = QFont(self._banner_font)
+                if self.minimal and rect.width() < 520:
+                    # The camera is a small panel in the cinema workspace: a smaller banner,
+                    # elided to the image width (the full outcome is under the camera).
+                    font.setPointSizeF(max(9.0, font.pointSizeF() * 0.78))
+                painter.setFont(font)
                 metrics = painter.fontMetrics()
-                box = QRectF(0, 0, metrics.horizontalAdvance(text) + 48, metrics.height() + 18)
+                text = metrics.elidedText(
+                    text, Qt.TextElideMode.ElideRight, int(max(40.0, rect.width() - 72))
+                )
+                box = QRectF(0, 0, metrics.horizontalAdvance(text) + 40, metrics.height() + 14)
                 box.moveCenter(QPointF(rect.center().x(), rect.top() + 26 + box.height() / 2))
                 background = QColor(palette.BACKGROUND)
                 background.setAlphaF(0.82 * alpha)

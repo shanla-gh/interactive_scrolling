@@ -35,7 +35,7 @@ class YouTubePanel(Card):
         self.playback = self.add_row("Playback")
         for label in (self.bridge, self.context):
             label.setWordWrap(True)
-        self.add_heading("PAIRING")
+        self.add_heading("Pairing")
         self.pairing_code = pairing_code
         row = QWidget()
         layout = QHBoxLayout(row)
