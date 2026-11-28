@@ -46,14 +46,15 @@ Eye and face tracking never control anything.
 | **M10** Minimal Co-op Doomscroll | Two-person host/guest gesture control of one Shorts feed over a private LAN session | Brief 003 |
 | **M11** Packaging & Release Candidate | Windows distribution, setup guide, clean-environment validation | Brief 003 |
 | **Beta stabilization** (Brief 004) | Root-cause analysis of the Director's test, gesture engine rework, diagnostics, Practice and Quick Calibration, browser reliability, benchmark and Audit 006 | Implemented; Director beta validation pending |
+| **Motion engine 2.0 and real-time** (Brief 009, M45-M53) | Full-app mode benchmark (Broadcast complaint investigated), faster downward decisions at >= 22 fps, repaint loop fixed, camera limits measured, driver frame times recorded, eye and gaze overlay, gaze calibration tool, Wrapped eye line | Implemented; Broadcast feel, gaze accuracy and independent recognition data need the Director |
 | **Product redesign** (Brief 008, M35-M44) | Normal Mode redesign (top bar, Now playing, session panel, diagnostics console), live Shorts preview via tab capture with preview-tab control, Doomscroll Together hardening and UI, Broadcast settings, natural clown makeup | Implemented; preview, visual and two-computer checks need the Director |
 | **Product experience** (Brief 007, M26-M34) | Baseline gate, clearer status and layout, Broadcast Mode status/positioning/smoothing, transparency fill, first-use guide, endurance tooling | Implemented; visual and creator usability need the Director |
 | **Pose-independent motion** (Brief 006, M19-M25) | Duplicate-hand fix, any-hand-shape engine, tracking-gap rules, trajectory overlay, frame-timing diagnostics | Implemented; whole-hand swipes and accidental swipes need the Director's judgement and a new held-out recording |
 | **Motion-first gestures** (Brief 005, M12-M18) | Shared motion engine, fist swipes (experimental), downward-motion analysis, per-direction calibration, motion visualization | Implemented; fist control and downward comfort need the Director's validation and session-5 recordings |
 
-Integration audits follow M4 (003), M6 (004), M10 (005), the beta stabilization (006), the motion-first work (007) and pose-independent motion (008), product experience (009) and the product redesign (010).
+Integration audits follow M4 (003), M6 (004), M10 (005), the beta stabilization (006), the motion-first work (007) and pose-independent motion (008), product experience (009), the product redesign (010) and Motion Engine 2.0 (011).
 
-**Next (needs the Director):** beta validation (`docs/milestones/BRIEF_008_VALIDATION.md`) and
+**Next (needs the Director):** beta validation (`docs/milestones/BRIEF_009_VALIDATION.md`) and
 the session-5 recordings with each hand (about 3 minutes each); a decision on finger vs fist
 control; then tuning of left/right swipes, the half-heart and
 the stop pose on real data, and the 30-minute false-trigger measurement. No new features until

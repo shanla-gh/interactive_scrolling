@@ -4,10 +4,27 @@ Source of truth for the current state of the project. Update it with every check
 
 | | |
 |---|---|
-| Version | 0.8.0b1 - beta, **not released** (no tag) |
-| Active work | Engineering Brief 008 (product redesign, live Shorts preview, Doomscroll Together) implemented; **Director validation pending** |
-| Engineering decision | PARTIALLY READY - SPECIFIC PREVIEW, VISUAL OR TWO-DEVICE VERIFICATION REQUIRED |
+| Version | 0.9.0b1 - beta, **not released** (no tag) |
+| Active work | Engineering Brief 009 (Motion Engine 2.0, real-time, passive eyes) implemented; **Director validation pending** |
+| Engineering decision | PARTIALLY READY - SPECIFIC HUMAN OR HARDWARE VERIFICATION REQUIRED |
 | Last updated | 2026-11-28 |
+
+## Brief 009 in one paragraph
+
+A full-application replay benchmark ran identical hand input through every presentation mode:
+recognition latency is about 10 ms median in all of them and the recognized gestures are
+identical, so no mode-specific recognition defect exists in replay. On the real camera,
+however, frames were lost at the capture handoff (up to 5 %, most in Broadcast Mode with every
+optional model) because the webcam delivers bursts; a two-frame bounded buffer removed that
+(39.5 -> 0.0 dropped per minute). Downward swipes (previous Short) now fire sooner at >= 22 fps
+(255 -> 192 ms finger, 432 -> 367 ms whole hand), the Broadcast overlay no longer repaints in a
+loop (CPU 6.1 -> 4.4 % with everything on), display smoothing lags less, the real camera limit
+(720p at 30 fps) is documented, driver frame times are recorded, and an optional eye and gaze
+overlay shows an honest, quality-gated estimate (display only). False positives, repeated
+gestures and gaze accuracy need new recordings or a person. Details:
+[Brief 009 report](docs/milestones/BRIEF_009_REPORT.md), [Audit 011](docs/audits/INTEGRATION_AUDIT_011.md),
+[performance](docs/benchmarks/PERFORMANCE_009.md), [gestures](docs/benchmarks/GESTURE_BENCHMARK_009.md),
+[validation](docs/milestones/BRIEF_009_VALIDATION.md).
 
 ## Brief 008 in one paragraph
 
@@ -97,6 +114,8 @@ Details: [Brief 005 report](docs/milestones/BRIEF_005_REPORT.md),
 | Integration Audit 009 | technical PASS; not a full pass | [Audit 009](docs/audits/INTEGRATION_AUDIT_009.md) |
 | Brief 008 product redesign (M35-M44) | implemented; technical pass; preview, visual and two-computer checks need the Director | [Brief 008 report](docs/milestones/BRIEF_008_REPORT.md) |
 | Integration Audit 010 | technical PASS; not a full pass | [Audit 010](docs/audits/INTEGRATION_AUDIT_010.md) |
+| Brief 009 Motion Engine 2.0 (M45-M53) | implemented; technical pass; Broadcast feel, gaze accuracy and independent recognition data need the Director | [Brief 009 report](docs/milestones/BRIEF_009_REPORT.md) |
+| Integration Audit 011 | technical PASS with one open intermittent test | [Audit 011](docs/audits/INTEGRATION_AUDIT_011.md) |
 
 ## Recognition results (development data from one person; all four real recordings)
 
@@ -110,33 +129,30 @@ Details: [Brief 005 report](docs/milestones/BRIEF_005_REPORT.md),
 | 15 fps / 10 % frame loss (synthetic) | finger up 4/8 (3 wrong) / 6/8 (2 wrong) | missed flicks let their return through |
 | Half-heart, stop | unchanged from 0.5 | |
 
-## Test results (2026-11-28, Brief 008)
+## Test results (2026-11-28, Brief 009)
 
 | Command | Result |
 |---|---|
 | `ruff format --check` / `ruff check` | clean |
-| `pytest` | 755 passed, 0 failed, 0 expected failures, 6 skipped (webcam and live tests, run separately) - Brief 007 end 699 |
-| Repeated full runs | 3 consecutive runs on the final code: all 755 passed |
+| `pytest` | 773 passed, 0 failed, 6 skipped in 2 of 3 final runs; 1 intermittent browser fixture failure in the third (not reproduced in 13 runs) |
 | `pytest tests/hardware --hardware` | 5 passed |
-| `pytest tests/live --live-youtube` | 19 of 20 runs passed after the harness fix (25 of 30 before); see Audit 010 |
 | Gesture regression gate | no regression in all five 0.6.0b1 configurations |
-| Packaged build `--self-test` | PASS (0.8.0b1) |
+| Packaged build `--self-test` | PASS (0.9.0b1) |
 | GitHub Actions | checked after the last push |
 
-## Performance (development machine, 1280x720; see docs/benchmarks/PERFORMANCE_008.md)
+## Performance (see docs/benchmarks/PERFORMANCE_009.md)
 
-| Run (automated) | fps capture/processing | Latency | App CPU | Memory |
-|---|---|---|---|---|
-| Normal, webcam only, 4 min | 30.1 / 30.0 | 15.4 ms | 4.5 % | 385 -> 405 MB |
-| Normal + live preview (real YouTube), 3 min | 30.2 / 30.2 | 18.5 ms | 4.6 % (+1.7 % in the browser) | 395 -> 408 MB |
-| Broadcast + transparency + face/eye models, 3 min | 30.1 / 30.1 | 13.8 ms | 4.9 % | 431 -> 420 MB |
-| Combined (preview + models), 3 min | 30.1 / 30.1 | 19.6 ms | 6.4 % | 434 -> 440 MB |
-| Background, 2 x 4 min | 30.1 / 30.0 | 15.5-16.7 ms | 3.7-3.9 % | 386 -> 388-401 MB |
+| Measurement | Result |
+|---|---|
+| Replay, 9 modes, capture -> recognition | about 10 ms median, <= 22 ms p99, identical gestures |
+| Broadcast with everything, app CPU (replay) | 6.1 % -> 4.4 % |
+| Real camera, dropped frames (Broadcast + all models, A/B) | 39.5 -> 0.0 per minute |
+| Endurance (real camera, automated) | 30 min Normal + preview, 30 min Broadcast + all models, 10 min mode cycling: no leaks, 0 invariant violations |
 
 ## Director validation
 
 Nothing in Briefs 002-004 has been verified by the Director yet (M1 was). Start with
-[BRIEF_008_VALIDATION.md](docs/milestones/BRIEF_008_VALIDATION.md) (about 30 minutes, plus a session with a friend); the older
+[BRIEF_009_VALIDATION.md](docs/milestones/BRIEF_009_VALIDATION.md) (about 25 minutes, optional recordings 25 minutes); the older
 [checklist](docs/milestones/DIRECTOR_ACCEPTANCE_CHECKLIST.md) covers the remaining Brief 003
 features (OBS, co-op on two PCs, packaging on a second PC).
 
@@ -144,13 +160,27 @@ features (OBS, co-op on two PCs, packaging on a second PC).
 
 | Severity | Issue |
 |---|---|
-| High (verification) | Doomscroll Together not tested on two computers; no real-person check of clown makeup, transparency or the new UI; gesture data from one person |
-| Medium | Live preview: popup click needed per session; extension reload after updating; Chrome and audio-by-ear unchecked |
-| Medium | One undiagnosed first-navigation failure in 20 live YouTube runs |
-| Medium | UI stalls 110-180 ms on window resize in the new layout; one unexplained 393 ms stall; rare Qt stalls not resolved |
-| Medium | OBS Windows Graphics Capture unverified; second monitor untested |
-| Medium | Any hand shape: about twice the accidental swipes of pointing finger only; low-fps flick returns |
-| Low | Together messages authenticated, not encrypted (VPN encrypts); packaged build unsigned |
+| High (verification) | Broadcast feel not checked by a person; no independent labelled recordings (recall/precision targets unmeasured); gaze accuracy unknown; Doomscroll Together not tested on two computers |
+| Medium | False positives unchanged (11 / 249 s any shape, 6 finger only); rapid repeats unmeasured |
+| Medium | Stalls during a 30-minute live-preview session (likely the test harness, not excluded); rare UI stalls |
+| Medium | Camera limited to 30 fps; recognition on arrival times (driver times recorded) |
+| Low | Intermittent browser fixture test (about 1 in 10 runs); packaged build unsigned |
+
+## Commits for Engineering Brief 009
+
+```
+6c19c42 feat(gestures): confirm low downward swipes on a clear slow-down at well-sampled frame rates
+19b6ea4 style: format and lint the decision-delay analysis script
+481fcc5 perf(ui): stop the repaint storm while feedback fades; cross-mode recognition test
+79950e9 perf(broadcast): less display-smoothing lag (beta 0.2 -> 0.5), measured on the recordings
+6e271dc feat(camera): record the driver's frame sample times; measured camera limits and delivery
+bf4c41e feat(eyes): optional eye and gaze overlay with an honest, quality-gated gaze estimate
+4177cec feat(eyes): gaze calibration evaluation tool (9 calibration, 8 separate evaluation points)
+6395bf0 feat(wrapped): optional eye analytics line (estimated, with unknown time shown)
+e529f28 feat(recordings): rapid-repeat recording session and scorer labels for held-out evaluation
+a92ef38 perf(pipeline): two-frame bounded handoff so camera bursts no longer lose frames
+(plus the commit with this status update)
+```
 
 ## Commits for Engineering Brief 008
 
@@ -228,7 +258,8 @@ Followed by the audit/status documentation commit.
 
 ## Recommended next steps
 
-1. Director: [BRIEF_008_VALIDATION.md](docs/milestones/BRIEF_008_VALIDATION.md) - reload the
-   extension, try the live preview, the clown strength, Broadcast settings.
-2. A Doomscroll Together session with a friend on the same Wi-Fi (and optionally over Tailscale).
-3. A held-out gesture recording with each hand (all existing ones were used for development).
+1. Director: [BRIEF_009_VALIDATION.md](docs/milestones/BRIEF_009_VALIDATION.md) - Broadcast vs
+   Normal feel, downward swipes, eye overlay.
+2. The optional held-out recordings (directions, rapid repeats, ordinary activity) for the first
+   independent recognition numbers and the driver-timestamp evaluation.
+3. The gaze calibration run, then decide on a passive gaze point.

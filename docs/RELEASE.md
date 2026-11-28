@@ -43,6 +43,11 @@ Rebuilt 2026-11-27: `dist\InteractiveScrolling-0.4.0b1-windows-x64.zip`; `--self
 empty data folder PASS (three models verified, hand/segmentation/face inference ok, settings and
 statistics created). Same machine; the second-computer check remains open.
 
+## Brief 009 (0.9.0b1)
+
+Rebuilt 2026-11-28: `dist\InteractiveScrolling-0.9.0b1-windows-x64.zip`; `--self-test` with an
+empty data folder PASS. Same machine; the second-computer check remains open.
+
 ## Brief 008 (0.8.0b1)
 
 Rebuilt 2026-11-28: `dist\InteractiveScrolling-0.8.0b1-windows-x64.zip` (157 MB, browser

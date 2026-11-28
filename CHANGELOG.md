@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.0b1] - beta (not released; Director validation pending)
+
+Engineering Brief 009: real-time pipeline investigation, motion-engine experiments, camera
+analysis and passive eye intelligence. The UI is unchanged.
+
+### Changed
+
+- Downward swipes (previous Short) are decided sooner at well-sampled frame rates: a stroke
+  that must stop inside the picture also counts as stopped once it has clearly slowed (below
+  half its peak) while the hand runs at >= 22 fps; median decision delay 255 -> 192 ms
+  (finger), 432 -> 367 ms (whole hand) on the development recordings; 15-20 fps unchanged.
+- Camera bursts no longer lose frames: the capture-to-processing handoff holds two frames
+  (real camera, Broadcast with every model: 39.5 -> 0.0 dropped frames per minute, +1.5-6 ms
+  latency).
+- Broadcast overlay and camera view no longer repaint in a loop while feedback fades
+  (overlay paints halved; Broadcast CPU 6.1 -> 4.4 % with every option on, in replay).
+- Display-only skeleton smoothing reacts faster (lag 3.5 -> 1.6 ms median).
+
+### Added
+
+- Optional **eye and gaze overlay**: eye outlines, iris centres and an estimated gaze
+  direction per eye and combined, quality-gated (hidden when blinking or turned away). Display
+  only - it never controls anything. More -> Show eye and gaze overlay, or Broadcast settings.
+- Doomscroll Wrapped: optional "Eyes (estimated)" line with unknown time shown.
+- Camera: the driver's own frame times are recorded alongside arrival times
+  (`Frame.sample_ns`), for a later timing evaluation.
+- Tools: full-application mode benchmark, camera mode probe, decision-delay analysis, display
+  smoothing evaluation, gaze calibration evaluation (needs a person), rapid-repeat recording
+  session, cross-mode recognition test.
+
 ## [0.8.0b1] - beta (not released; Director validation pending)
 
 Engineering Brief 008: product redesign, live Shorts preview and Doomscroll Together.

@@ -258,3 +258,23 @@ version 0.3 for the benchmark).
 * Finger flicks need about 30 fps; at 15 fps they are undersampled (hand movements still work).
 * An opposite swipe right after a swipe needs the hand back near the start with a brief pause.
 * The stop pose is unreliable with the open hand far from the camera (detection).
+
+## Brief 009: decision delay of downward swipes and frame-rate awareness
+
+Pipeline analysis showed that only downward swipes (previous Short) waited after reaching their
+distance: a stroke with the hand in the bottom 15 % of the picture, and every whole-hand
+downward stroke (`down_at_stop`), is confirmed only once it stops inside the view, so a hand
+lowered out of the picture is not a swipe. Median wait 255 ms (finger) / 432 ms (whole hand).
+
+Adopted (`RecognizerOptions.down_stop_fraction = 0.5`, `early_min_fps = 22`): such a stroke also
+counts as stopped once its speed has fallen below half its peak, but only while the control
+hand's measured frame rate (median of the last 12 frame intervals) is at least 22 fps. A hand
+lowered out of view keeps its speed until tracking is lost, so it still never confirms; at 15-20
+fps the previous rule stays, because there the slow-down estimate is coarse and the wait
+prevented duplicate and reversal errors. Result on the development recordings: 192 ms /
+367 ms, no regression in the five frozen configurations (GESTURE_BENCHMARK_009.md). Rejected:
+a larger bottom zone (re-opened the Brief 005 false swipe), longer whole-hand travel or settle
+time, shorter cooldowns (no evidence), flick recovery by speed (no effect), periodic driver
+timestamps (regressed on an approximation; recordings with real sample times needed).
+
+Motion code uses actual frame timestamps everywhere; there is no fixed frame interval.
