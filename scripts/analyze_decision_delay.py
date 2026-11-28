@@ -16,11 +16,10 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evaluate_gestures import load, tracking_of  # noqa: E402
-
-from interactive_scrolling.config.settings import GestureSettings  # noqa: E402
-from interactive_scrolling.gestures.engine import GestureEngine  # noqa: E402
-from interactive_scrolling.motion.analyzer import MotionAnalyzer  # noqa: E402
+from evaluate_gestures import load, tracking_of
+from interactive_scrolling.config.settings import GestureSettings
+from interactive_scrolling.gestures.engine import GestureEngine
+from interactive_scrolling.motion.analyzer import MotionAnalyzer
 
 
 def main() -> int:
@@ -56,7 +55,10 @@ def main() -> int:
                 by[f"{ev.detector or '-'} {ev.gesture.value}"].append(
                     (ev.duration_s * 1000, ev.decision_delay_s * 1000)
                 )
-    print(f"{'detector gesture':40s} {'n':>4s} {'stroke ms med':>14s} {'decision ms med':>16s} {'p90':>6s}")
+    print(
+        f"{'detector gesture':40s} {'n':>4s} {'stroke ms med':>14s} "
+        f"{'decision ms med':>16s} {'p90':>6s}"
+    )
     for key in sorted(by):
         rows = by[key]
         dec = sorted(d for _, d in rows)
