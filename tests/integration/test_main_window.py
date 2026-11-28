@@ -60,6 +60,8 @@ def test_initial_state(qtbot) -> None:
 
 def test_live_frames_update_view_and_panels(qtbot) -> None:
     window = make_window(qtbot)
+    # Brief 010: the detail panels refresh only while the diagnostics console shows them.
+    window.console.set_expanded(True)
     start(qtbot, window)
     assert window.status_pill.text() == "●  Camera on"
     assert window.start_button.text() == "Stop camera"

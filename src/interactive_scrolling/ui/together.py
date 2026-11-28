@@ -73,7 +73,7 @@ def _label(text: str = "", name: str = "hint", wrap: bool = True) -> QLabel:
 class HostDialog(QDialog):
     """Name and network for a new session (the port is an advanced detail)."""
 
-    def __init__(self, name: str, parent: QWidget | None = None) -> None:
+    def __init__(self, name: str, parent: QWidget | None = None, port: int = DEFAULT_PORT) -> None:
         super().__init__(parent)
         self.setWindowTitle("Host Doomscroll Together")
         layout = QVBoxLayout(self)
@@ -95,7 +95,7 @@ class HostDialog(QDialog):
         form.addRow("Friend joins from", self.network)
         self.port = QSpinBox()
         self.port.setRange(1024, 65535)
-        self.port.setValue(DEFAULT_PORT)
+        self.port.setValue(port)
         form.addRow("Port", self.port)
         layout.addLayout(form)
         layout.addWidget(
@@ -189,6 +189,8 @@ class TogetherPanel(QWidget):
         super().__init__(parent)
         self.join_signals = _JoinSignals()
         self.player_name = "Player 1"
+        self.host_port = DEFAULT_PORT
+        """Defaults for the Host dialog (Settings, Doomscroll Together)."""
         self._invitation = ""
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -283,13 +285,14 @@ class TogetherPanel(QWidget):
         root.addLayout(row)
         self.error = _label("", "hint")
         self.error.setProperty("error", True)
+        self.error.setVisible(False)
         root.addWidget(self.error)
         self.show_status(CoopStatus(role="off", state="no session"))
 
     # ------------------------------------------------------------------ dialogs
 
     def _open_host(self) -> None:
-        dialog = HostDialog(self.player_name, self)
+        dialog = HostDialog(self.player_name, self, self.host_port)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             name, port, bind = dialog.values()
             self.player_name = name or self.player_name
@@ -309,6 +312,7 @@ class TogetherPanel(QWidget):
 
     def show_error(self, text: str) -> None:
         self.error.setText(text)
+        self.error.setVisible(bool(text))
 
     # ------------------------------------------------------------------ state
 

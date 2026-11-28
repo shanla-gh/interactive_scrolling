@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -170,15 +171,26 @@ PRESETS = (
 
 
 class GestureSettingsDialog(QDialog):
+    """Gesture settings as a dialog (Save / Cancel) or, ``embedded``, as the Gestures page of
+    Unified Settings (Apply / Revert / Restore defaults; :attr:`applied` carries the result)."""
+
+    applied = Signal(object, object)
+    """Embedded only: validated (GestureSettings, mapping) after Apply."""
+
     def __init__(
         self,
         settings: GestureSettings,
         mapping: dict[GestureType, ActionType],
         parent: QWidget | None = None,
+        embedded: bool = False,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Gesture settings")
-        self.setMinimumWidth(460)
+        self.embedded = embedded
+        if embedded:
+            self.setWindowFlags(Qt.WindowType.Widget)
+        else:
+            self.setWindowTitle("Gesture settings")
+            self.setMinimumWidth(460)
         self._loading = False
         root = QVBoxLayout(self)
 
@@ -270,16 +282,27 @@ class GestureSettingsDialog(QDialog):
         form.addRow(note)
         root.addWidget(map_box)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save
-            | QDialogButtonBox.StandardButton.Cancel
-            | QDialogButtonBox.StandardButton.RestoreDefaults
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        if embedded:
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Apply
+                | QDialogButtonBox.StandardButton.Reset
+                | QDialogButtonBox.StandardButton.RestoreDefaults
+            )
+            buttons.button(QDialogButtonBox.StandardButton.Reset).setText("Revert")
+            buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self.apply)
+            self.revert_button = buttons.button(QDialogButtonBox.StandardButton.Reset)
+        else:
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Save
+                | QDialogButtonBox.StandardButton.Cancel
+                | QDialogButtonBox.StandardButton.RestoreDefaults
+            )
+            buttons.accepted.connect(self.accept)
+            buttons.rejected.connect(self.reject)
         buttons.button(QDialogButtonBox.StandardButton.RestoreDefaults).clicked.connect(
             self.restore_defaults
         )
+        self.buttons = buttons
         row = QHBoxLayout()
         self.error = QLabel("")
         self.error.setObjectName("rowKey")
@@ -290,7 +313,8 @@ class GestureSettingsDialog(QDialog):
 
     def _show_advanced(self, on: bool) -> None:
         self.tune_box.setVisible(on)
-        self.adjustSize()
+        if not self.embedded:
+            self.adjustSize()
 
     # ------------------------------------------------------------------ state
 
@@ -356,3 +380,15 @@ class GestureSettingsDialog(QDialog):
             self.error.setText(str(exc))
             return
         super().accept()
+
+    def apply(self) -> bool:
+        """Embedded: validate and emit :attr:`applied` (the window applies and saves)."""
+        try:
+            settings = self.result_settings()
+            mapping = self.result_mapping()
+        except (ConfigError, ValueError) as exc:
+            self.error.setText(str(exc))
+            return False
+        self.error.setText("Applied.")
+        self.applied.emit(settings, mapping)
+        return True

@@ -1,4 +1,4 @@
-"""Activity & diagnostics: the collapsible technical area at the bottom of Normal Mode.
+"""Diagnostics: the collapsible technical console at the bottom of Studio Mode.
 
 Collapsed, it is one line: the live performance figures and the latest action. Expanded, it
 shows the gesture history and log, the recognition state, performance and tracking figures,
@@ -52,6 +52,8 @@ class DiagnosticsConsole(QFrame):
         performance: list[QWidget],
         connections: list[QWidget],
         expanded: bool = False,
+        camera: list[QWidget] | None = None,
+        eyes: list[QWidget] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -97,7 +99,11 @@ class DiagnosticsConsole(QFrame):
         self.tabs = QTabWidget()
         self.tabs.addTab(activity, "Activity")
         self.tabs.addTab(_scroll([recognition]), "Recognition")
+        if camera:
+            self.tabs.addTab(_scroll(camera), "Camera")
         self.tabs.addTab(_scroll(performance, horizontal=True), "Performance")
+        if eyes:
+            self.tabs.addTab(_scroll(eyes), "Eye tracking")
         self.tabs.addTab(_scroll(connections, horizontal=True), "Browser and Together")
         root.addWidget(self.tabs)
         self.expanded = not expanded
@@ -108,9 +114,7 @@ class DiagnosticsConsole(QFrame):
             return
         self.expanded = expanded
         self.tabs.setVisible(expanded)
-        self.toggle.setText(
-            "▾  Activity && diagnostics" if expanded else "▸  Activity && diagnostics"
-        )
+        self.toggle.setText("▾  Diagnostics" if expanded else "▸  Diagnostics")
         self.toggle.setToolTip(
             "Hide the technical details"
             if expanded
@@ -119,6 +123,14 @@ class DiagnosticsConsole(QFrame):
         self.setFixedHeight(EXPANDED_HEIGHT if expanded else self.sizeHint().height())
         if notify:
             self.expanded_changed.emit(expanded)
+
+    @property
+    def showing(self) -> bool:
+        """Expanded and on screen: only then are the detail tabs refreshed."""
+        return self.expanded and self.isVisible()
+
+    def current_tab(self) -> str:
+        return self.tabs.tabText(self.tabs.currentIndex())
 
     def sizeHint(self):  # type: ignore[no-untyped-def]
         hint = super().sizeHint()

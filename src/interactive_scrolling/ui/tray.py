@@ -65,7 +65,7 @@ class TrayController(QObject):
         disable_text = "Stop gesture control" + (f"  ({hotkey_label})" if hotkey_label else "")
         self.disable_action = self.menu.addAction(disable_text, self.disable_control.emit)
         self.menu.addSeparator()
-        self.menu.addAction("Normal Mode", lambda: self.mode_requested.emit("developer"))
+        self.menu.addAction("Studio Mode", lambda: self.mode_requested.emit("developer"))
         self.menu.addAction("Broadcast Mode", lambda: self.mode_requested.emit("creator"))
         self.menu.addAction("Broadcast settings...", self.broadcast_settings_requested.emit)
         self.menu.addAction("Background Mode", lambda: self.mode_requested.emit("background"))

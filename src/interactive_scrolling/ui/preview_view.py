@@ -21,7 +21,10 @@ HOW_TO = (
     "Watch here while you scroll.\n\nIn your browser, open a YouTube Short, click the "
     "Interactive Scrolling extension icon and choose “Show this Short in the app”."
 )
-NOT_CONNECTED = "Connect your browser first (Browser, on the right)."
+NOT_CONNECTED = (
+    "Your browser is not connected.\n\nSet up the Interactive Scrolling extension once "
+    "(Settings, Browser), then open YouTube Shorts."
+)
 
 
 class PreviewView(QWidget):
@@ -96,13 +99,13 @@ class PreviewView(QWidget):
     # ------------------------------------------------------------------ painting
 
     def frame_rect(self) -> QRectF:
-        """Where the 9:16 picture goes: as large as fits, centred horizontally, top-aligned."""
+        """Where the 9:16 picture goes: as large as fits, centred (cinema area, Brief 010)."""
         w, h = self.width(), self.height()
         if w / max(1, h) > SHORTS_ASPECT:
             pw, ph = h * SHORTS_ASPECT, float(h)
         else:
             pw, ph = float(w), w / SHORTS_ASPECT
-        return QRectF((w - pw) / 2, 0, pw, ph)
+        return QRectF((w - pw) / 2, (h - ph) / 2, pw, ph)
 
     def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         painter = QPainter(self)
@@ -111,7 +114,8 @@ class PreviewView(QWidget):
         rect = self.frame_rect()
         path = QPainterPath()
         path.addRoundedRect(rect, 10, 10)
-        painter.fillPath(path, QColor(theme.SURFACE))
+        t = theme.tokens()
+        painter.fillPath(path, QColor(t.media_bg if self.image is not None else t.surface_alt))
         if self.image is not None:
             painter.save()
             painter.setClipPath(path)
@@ -124,10 +128,10 @@ class PreviewView(QWidget):
             painter.drawImage(target, img)
             painter.restore()
         else:
-            painter.setPen(QPen(QColor(theme.LINE), 1))
+            painter.setPen(QPen(QColor(t.border), 1))
             painter.drawPath(path)
-            painter.setPen(QColor(theme.MUTED))
-            margin = 18
+            painter.setPen(QColor(t.text_muted))
+            margin = 22
             text_rect = rect.adjusted(margin, margin, -margin, -margin)
             painter.drawText(
                 text_rect,

@@ -1,25 +1,19 @@
-"""Face features UI: clown and eye-analytics settings, calibration, Visual Behavior Report."""
+"""Face features UI: eye-analytics calibration and the Visual Behavior Report (the clown and eye
+options are in Unified Settings since Brief 010)."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
     QDialog,
-    QDialogButtonBox,
-    QDoubleSpinBox,
-    QFormLayout,
     QLabel,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from interactive_scrolling.config.settings import EffectsSettings
 from interactive_scrolling.storage.analytics import EyeReport
 from interactive_scrolling.ui.panels import NO_DATA, Card
 from interactive_scrolling.ui.report_panels import UNAVAILABLE, duration
@@ -27,78 +21,6 @@ from interactive_scrolling.vision.face_tracker import FaceObservation
 from interactive_scrolling.wellbeing.eyes import Calibration, calibrate
 
 CALIBRATION_S = 3.0
-
-
-class EffectsDialog(QDialog):
-    def __init__(self, settings: EffectsSettings, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Face effects and eye analytics")
-        self.setMinimumWidth(440)
-        self._settings = settings
-        root = QVBoxLayout(self)
-        form = QFormLayout()
-        self.clown = QCheckBox("Progressive Clown Transformation")
-        self.clown.setChecked(settings.clown_enabled)
-        form.addRow(self.clown)
-        self.stages: list[QDoubleSpinBox] = []
-        for label, value in zip(
-            ("Red nose after", "Partial makeup after", "Full clown after"),
-            settings.clown_thresholds,
-            strict=True,
-        ):
-            spin = QDoubleSpinBox()
-            spin.setRange(0, 600)
-            spin.setDecimals(0)
-            spin.setSuffix(" min of scrolling")
-            spin.setValue(value)
-            self.stages.append(spin)
-            form.addRow(label, spin)
-        self.preview = QComboBox()
-        self.preview.addItem("Off (follow the scrolling session)", None)
-        for stage in range(4):
-            self.preview.addItem(f"Preview stage {stage}", stage)
-        self.preview.setCurrentIndex(self.preview.findData(settings.clown_preview_stage))
-        form.addRow("Preview", self.preview)
-        self.eyes = QCheckBox("Passive eye analytics (estimates only, never controls anything)")
-        self.eyes.setChecked(settings.eye_analytics_enabled)
-        form.addRow(self.eyes)
-        root.addLayout(form)
-        note = QLabel(
-            "Face landmarks are computed on this computer only for these two features. No face "
-            "images, landmarks or identities are stored; eye analytics keep only daily totals."
-        )
-        note.setWordWrap(True)
-        note.setObjectName("rowKey")
-        root.addWidget(note)
-        self.error = QLabel("")
-        self.error.setObjectName("rowKey")
-        root.addWidget(self.error)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
-
-    def result_settings(self) -> EffectsSettings:
-        a, b, c = (spin.value() for spin in self.stages)
-        return replace(
-            self._settings,
-            clown_enabled=self.clown.isChecked(),
-            clown_stage1_min=a,
-            clown_stage2_min=b,
-            clown_stage3_min=c,
-            clown_preview_stage=self.preview.currentData(),
-            eye_analytics_enabled=self.eyes.isChecked(),
-        )
-
-    def accept(self) -> None:
-        try:
-            self.result_settings()
-        except ValueError as exc:
-            self.error.setText(str(exc))
-            return
-        super().accept()
 
 
 class CalibrationDialog(QDialog):

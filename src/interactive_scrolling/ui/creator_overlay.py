@@ -377,7 +377,7 @@ class CreatorOverlay(QWidget):
             action.triggered.connect(lambda _=False, c=corner: self.move_to_corner(c))
             position.addAction(action)
         menu.addSeparator()
-        menu.addAction("Normal Mode", self.developer_requested.emit)
+        menu.addAction("Studio Mode", self.developer_requested.emit)
         menu.addAction("Background Mode (tray)", self.background_requested.emit)
         menu.addSeparator()
         menu.addAction("Quit Interactive Scrolling", self.quit_requested.emit)

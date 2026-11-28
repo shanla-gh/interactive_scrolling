@@ -5,17 +5,11 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
-    QDialogButtonBox,
-    QDoubleSpinBox,
-    QFormLayout,
     QLabel,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
-from interactive_scrolling.config.settings import WellbeingSettings
 from interactive_scrolling.core.pipeline import PipelineMetrics
 from interactive_scrolling.gestures.types import stored_gesture_label
 from interactive_scrolling.ui.panels import NO_DATA, Card
@@ -230,63 +224,3 @@ class PerformancePanel(Card):
             f"{metrics.latency_ms:.1f} ms" if running and metrics.latency_ms else NO_DATA
         )
         self.recognition.setText(f"{gesture_ms:.2f} ms" if gesture_ms is not None else NO_DATA)
-
-
-class WellbeingDialog(QDialog):
-    def __init__(self, settings: WellbeingSettings, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Limits and reminders")
-        self.setMinimumWidth(420)
-        root = QVBoxLayout(self)
-        form = QFormLayout()
-        self.enabled = QCheckBox("Show Reality Checks and limit reminders")
-        self.enabled.setChecked(settings.enabled)
-        form.addRow(self.enabled)
-
-        def spin(value: float, low: float, high: float, suffix: str) -> QDoubleSpinBox:
-            box = QDoubleSpinBox()
-            box.setRange(low, high)
-            box.setDecimals(0)
-            box.setValue(value)
-            box.setSuffix(suffix)
-            return box
-
-        self.session = spin(settings.session_limit_min, 1, 600, " min")
-        self.budget = spin(settings.daily_budget_min, 1, 1440, " min")
-        self.reality = spin(settings.reality_check_min, 0, 240, " min (0 = off)")
-        form.addRow("Session limit", self.session)
-        form.addRow("Daily scrolling budget", self.budget)
-        form.addRow("Reality Check every", self.reality)
-        self.breaks = QCheckBox("Suggest a break when a limit is reached")
-        self.breaks.setChecked(settings.break_reminders)
-        self.pause = QCheckBox("Pause gesture scrolling when a limit is reached (resume anytime)")
-        self.pause.setChecked(settings.pause_at_limit)
-        self.humor = QCheckBox("Playful wording (Doomscroll Index, Wrapped)")
-        self.humor.setChecked(settings.humorous_labels)
-        for box in (self.breaks, self.pause, self.humor):
-            form.addRow(box)
-        root.addLayout(form)
-        note = QLabel(
-            "Only gesture navigation between Shorts can be paused. Your mouse, keyboard, likes, "
-            "playback and tab switching keep working, and nothing is opened or closed."
-        )
-        note.setWordWrap(True)
-        note.setObjectName("rowKey")
-        root.addWidget(note)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
-
-    def result_settings(self) -> WellbeingSettings:
-        return WellbeingSettings(
-            enabled=self.enabled.isChecked(),
-            session_limit_min=self.session.value(),
-            daily_budget_min=self.budget.value(),
-            reality_check_min=self.reality.value(),
-            break_reminders=self.breaks.isChecked(),
-            pause_at_limit=self.pause.isChecked(),
-            humorous_labels=self.humor.isChecked(),
-        )

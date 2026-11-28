@@ -341,11 +341,25 @@ class AppearanceSettings:
     getting_started_done: bool = False
     """The first-use guide was closed with "Don't show this at start"."""
     console_expanded: bool = False
-    """Normal Mode: the Activity & diagnostics area is open (Brief 008)."""
-    show_now_playing: bool = True
-    """Normal Mode: the Now playing column (live Shorts preview) is shown."""
+    """Studio Mode: the Diagnostics area is open (Brief 008)."""
+    theme: str = "black"
+    """Application theme: black, white or gray (Brief 010)."""
+    session_panel_expanded: bool = True
+    """The Your session panel is expanded (collapsed: a narrow strip)."""
+    left_panel_width: int = 0
+    """Width of the camera panel in logical pixels (0: the default)."""
+    session_panel_width: int = 0
+    """Width of the expanded session panel in logical pixels (0: the default)."""
+    focus_view: bool = False
+    """Focus View: only camera, Short and essential gesture controls are shown."""
 
     def __post_init__(self) -> None:
+        if self.theme not in ("black", "white", "gray"):
+            raise ConfigError(f"theme must be black, white or gray, got {self.theme!r}.")
+        for name in ("left_panel_width", "session_panel_width"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 4000:
+                raise ConfigError(f"{name} must be 0-4000, got {value!r}.")
         if not _valid_color(self.skeleton_color):
             raise ConfigError(
                 f"skeleton_color must be 'auto' or #rrggbb, got {self.skeleton_color!r}."
@@ -485,6 +499,23 @@ class EffectsSettings:
     @property
     def clown_thresholds(self) -> tuple[float, float, float]:
         return (self.clown_stage1_min, self.clown_stage2_min, self.clown_stage3_min)
+
+
+@dataclass(frozen=True)
+class TogetherSettings:
+    """Doomscroll Together preferences (Brief 010): defaults for the Host and Join dialogs."""
+
+    player_name: str = ""
+    """The name shown to your friend ("" = "Player 1")."""
+    host_port: int = 47816
+    """The port a hosted session listens on (``coop.session.DEFAULT_PORT``)."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.player_name, str) or len(self.player_name) > 24:
+            raise ConfigError("player_name must be at most 24 characters.")
+        port = self.host_port
+        if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+            raise ConfigError(f"host_port must be 1024-65535, got {port!r}.")
 
 
 @dataclass

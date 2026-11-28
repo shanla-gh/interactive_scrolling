@@ -108,7 +108,8 @@ def background(window, services) -> None:  # type: ignore[no-untyped-def]
 def normal_console_no_preview(window, services) -> None:  # type: ignore[no-untyped-def]
     window.set_ui_mode("developer")
     window.console.set_expanded(True)
-    window.now_playing_action.setChecked(False)
+    # Brief 010: the Short is no longer hidden from a menu; collapse Your session instead.
+    window.session_panel.set_expanded(False)
 
 
 def test_recognition_is_the_same_in_every_presentation_mode(qtbot) -> None:

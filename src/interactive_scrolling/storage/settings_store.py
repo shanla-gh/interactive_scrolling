@@ -44,6 +44,7 @@ from interactive_scrolling.config.settings import (
     EffectsSettings,
     GestureSettings,
     SensitivityPreset,
+    TogetherSettings,
     WellbeingSettings,
 )
 from interactive_scrolling.gestures.types import GestureType
@@ -90,6 +91,7 @@ class UserSettings:
     wellbeing: WellbeingSettings = field(default_factory=WellbeingSettings)
     effects: EffectsSettings = field(default_factory=EffectsSettings)
     calibration: CalibrationProfile = field(default_factory=CalibrationProfile)
+    together: TogetherSettings = field(default_factory=TogetherSettings)
 
 
 SECTIONS: dict[str, type] = {
@@ -98,6 +100,7 @@ SECTIONS: dict[str, type] = {
     "wellbeing": WellbeingSettings,
     "effects": EffectsSettings,
     "calibration": CalibrationProfile,
+    "together": TogetherSettings,
 }
 """Simple settings sections stored as JSON objects (fields of bool, int, float, str, enum or
 optional int), validated field by field."""

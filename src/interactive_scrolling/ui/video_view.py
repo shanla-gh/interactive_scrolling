@@ -14,7 +14,7 @@ from interactive_scrolling.config.settings import AppearanceSettings, OverlaySet
 from interactive_scrolling.core.pipeline import ProcessedFrame
 from interactive_scrolling.core.timing import RateMeter, now_ns
 from interactive_scrolling.gestures.explain import state_label
-from interactive_scrolling.ui.theme import UI_FONT_FAMILIES, mono_font
+from interactive_scrolling.ui.theme import UI_FONT_FAMILIES, mono_font, tokens
 from interactive_scrolling.visualization import palette
 from interactive_scrolling.visualization.geometry import ViewTransform
 from interactive_scrolling.visualization.overlay import OverlayRenderer
@@ -147,8 +147,14 @@ class VideoView(QWidget):
 
     def _paint(self) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(palette.BACKGROUND))
         transform = self.current_transform()
+        if not self.minimal:
+            background = palette.BACKGROUND
+        elif transform is None or self._image is None:
+            background = tokens().surface_alt  # an empty state, in the application theme
+        else:
+            background = tokens().media_bg  # letterbox around the camera image
+        painter.fillRect(self.rect(), QColor(background))
         if transform is None or self._image is None or self._frame is None:
             self._paint_placeholder(painter)
         else:
@@ -196,9 +202,9 @@ class VideoView(QWidget):
         if self.minimal:
             painter.save()
             painter.setFont(self._placeholder_font)
-            painter.setPen(QColor(palette.TEXT_MUTED))
+            painter.setPen(QColor(tokens().text_muted))
             painter.drawText(
-                QRectF(self.rect()).adjusted(40, 40, -40, -40),
+                QRectF(self.rect()).adjusted(24, 24, -24, -24),
                 Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
                 self._placeholder,
             )

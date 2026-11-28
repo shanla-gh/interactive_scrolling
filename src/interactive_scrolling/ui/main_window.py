@@ -1,4 +1,11 @@
-"""Main application window."""
+"""Main application window: the cinema workspace (Brief 010).
+
+Top bar: product, camera state, Black | White | Gray, Studio | Broadcast, Settings and Start /
+Stop camera. Below it a three-pane splitter - the camera and gesture panel on the left, the
+live YouTube Short in the centre and the collapsible Your session panel on the right - and the
+technical diagnostics console at the bottom. Every feature option lives in Unified Settings
+(``settings_window.py``); the window keeps only time-critical controls.
+"""
 
 from __future__ import annotations
 
@@ -11,26 +18,24 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QColor, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
-    QButtonGroup,
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QMenu,
     QPushButton,
-    QSizePolicy,
-    QToolButton,
+    QScrollArea,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
 from interactive_scrolling import __version__
 from interactive_scrolling.actions.types import ActionRecord, ActionStatus, ControlMode
-from interactive_scrolling.config.settings import AppSettings, CameraSettings
+from interactive_scrolling.config.settings import AppSettings, CameraSettings, TogetherSettings
 from interactive_scrolling.core.auxiliary import AuxiliaryWorker
 from interactive_scrolling.core.diagnostics import ResourceMonitor
 from interactive_scrolling.core.pipeline import (
@@ -49,28 +54,33 @@ from interactive_scrolling.storage.settings_store import (
     MOTION_STYLE_NOTICE,
     VERTICAL_DIRECTION_NOTICE,
 )
-from interactive_scrolling.ui.appearance_dialog import AppearanceDialog
+from interactive_scrolling.ui import theme
 from interactive_scrolling.ui.bridge import PipelineBridge, QtLogHandler
-from interactive_scrolling.ui.camera_settings import CameraSettingsDialog
 from interactive_scrolling.ui.console import DiagnosticsConsole
-from interactive_scrolling.ui.control_bar import ControlBar
+from interactive_scrolling.ui.control_bar import ControlBar, SegmentedControl
 from interactive_scrolling.ui.creator_overlay import CreatorOverlay
-from interactive_scrolling.ui.effects_panel import (
-    CalibrationDialog,
-    EffectsDialog,
-    VisualBehaviorPanel,
-)
+from interactive_scrolling.ui.effects_panel import CalibrationDialog, VisualBehaviorPanel
 from interactive_scrolling.ui.gesture_panels import GestureHistory, GesturePanel, outcome_banner
 from interactive_scrolling.ui.hotkey import GlobalHotkey
 from interactive_scrolling.ui.panels import MotionPanel, OverlayPanel, TrackingPanel
 from interactive_scrolling.ui.preview_view import PreviewView
-from interactive_scrolling.ui.report_panels import (
-    DailyReportPanel,
-    PerformancePanel,
-    WellbeingDialog,
+from interactive_scrolling.ui.report_panels import DailyReportPanel, PerformancePanel
+from interactive_scrolling.ui.session_panel import (
+    DEFAULT_WIDTH as SESSION_DEFAULT_WIDTH,
 )
-from interactive_scrolling.ui.session_panel import PanelDialog, SessionPanel
-from interactive_scrolling.ui.settings_dialog import GestureSettingsDialog
+from interactive_scrolling.ui.session_panel import (
+    MAX_WIDTH as SESSION_MAX_WIDTH,
+)
+from interactive_scrolling.ui.session_panel import (
+    MIN_WIDTH as SESSION_MIN_WIDTH,
+)
+from interactive_scrolling.ui.session_panel import (
+    STRIP_WIDTH,
+    PanelDialog,
+    SessionPanel,
+    short_duration,
+)
+from interactive_scrolling.ui.settings_window import CameraSettingsForm, SettingsWindow
 from interactive_scrolling.ui.theme import repolish
 from interactive_scrolling.ui.together import TogetherPanel
 from interactive_scrolling.ui.tray import TrayController
@@ -95,6 +105,24 @@ ProbeFunction = Callable[[], list[CameraInfo]]
 SegmenterFactory = Callable[[], object]
 
 UI_MODES = ("developer", "creator", "background")
+LEFT_DEFAULT_WIDTH = 340
+LEFT_MIN_WIDTH = 270
+LEFT_MAX_WIDTH = 620
+CINEMA_MIN_WIDTH = 300
+THEMES = (
+    ("black", "Black", "Dark theme"),
+    ("white", "White", "Light theme"),
+    ("gray", "Gray", "Neutral gray theme"),
+)
+PRESENTATION = (
+    ("developer", "Studio", "The full application window"),
+    (
+        "creator",
+        "Broadcast",
+        "A small always-on-top camera window over the browser, for recording and streaming "
+        "(OBS). Does not change gesture control.",
+    ),
+)
 """Presentation modes. They are independent of the control (safety) modes and never touch the
 camera, the models or the dispatcher: one runtime, several views."""
 
@@ -154,7 +182,8 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Interactive Scrolling")
         self.resize(1360, 860)
-        self.setMinimumSize(960, 560)
+        # Fits a 1366 x 768 laptop at 150 % scaling (about 910 x 510 logical pixels).
+        self.setMinimumSize(860, 480)
 
         # UI responsiveness instrumentation (Integration Audit 003): a watchdog thread
         # attributes every UI stall to the running handler, GC and worker progress.
@@ -220,6 +249,15 @@ class MainWindow(QMainWindow):
         self.control_bar = ControlBar()
         self.control_bar.settings_requested.connect(self.open_gesture_settings)
         self.control_bar.practice_requested.connect(self.open_practice)
+        self.control_bar.camera_settings_requested.connect(self.open_camera_settings)
+        self.control_bar.layer_toggled.connect(self._toggle_layer)
+        self.control_bar.set_layers(
+            {
+                "show_skeleton": settings.overlay.show_skeleton,
+                "show_vectors": settings.overlay.show_vectors,
+                "eyes": self.services.user_settings.effects.eye_overlay,
+            }
+        )
         self.gesture_panel = GesturePanel()
         self.history = GestureHistory()
         user = self.services.user_settings
@@ -227,6 +265,8 @@ class MainWindow(QMainWindow):
         self.today_panel = DailyReportPanel(user.analytics_enabled)
         self.performance_panel = PerformancePanel()
         self.coop_panel = TogetherPanel()
+        self.coop_panel.player_name = user.together.player_name or "Player 1"
+        self.coop_panel.host_port = user.together.host_port
         self.coop_panel.renew_requested.connect(self._renew_invitation)
         self.coop_panel.host_requested.connect(self.host_coop)
         self.coop_panel.end_requested.connect(self.services.end_coop)
@@ -239,19 +279,18 @@ class MainWindow(QMainWindow):
         self.visual_panel = VisualBehaviorPanel()
         self.visual_panel.calibrate_requested.connect(self.calibrate_eyes)
         self.visual_panel.settings_requested.connect(self.open_effects)
-        self.camera_dialog = CameraSettingsDialog(
-            settings.camera, self.overlay_panel, self._probe_cameras is not None, self
-        )
-        # The camera request widgets keep their historical names on the window.
-        self.camera_combo = self.camera_dialog.camera_combo
-        self.resolution_combo = self.camera_dialog.resolution_combo
-        self.scan_button = self.camera_dialog.scan_button
+        # Device, resolution and frame-rate request (Settings, Camera). The camera request
+        # widgets keep their historical names on the window.
+        self.camera_form = CameraSettingsForm(settings.camera, self._probe_cameras is not None)
+        self.camera_combo = self.camera_form.camera_combo
+        self.resolution_combo = self.camera_form.resolution_combo
+        self.scan_button = self.camera_form.scan_button
         self.scan_button.clicked.connect(self._scan_cameras)
-        self.appearance_button = self.camera_dialog.appearance_button
-        self.appearance_button.clicked.connect(self.open_appearance)
         feed = self._preview_feed()
         self.preview = PreviewView(feed)
-        self.session_panel = SessionPanel(self.coop_panel)
+        appearance = user.appearance
+        self.session_panel = SessionPanel(self.coop_panel, appearance.session_panel_expanded)
+        self.session_panel.expanded_changed.connect(self._session_panel_toggled)
         self.session_panel.browser.setup_requested.connect(self.open_browser_setup)
         self.session_panel.browser.stop_preview_requested.connect(self.stop_preview)
         self.session_panel.today.report_requested.connect(self.open_report)
@@ -266,7 +305,10 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_console())
         self.setCentralWidget(central)
         self.video.set_minimal(True)
-        self._set_now_playing(user.appearance.show_now_playing, save=False)
+        self._layout_timer = QTimer(self)
+        self._layout_timer.setSingleShot(True)
+        self._layout_timer.setInterval(400)
+        self._layout_timer.timeout.connect(self._save_layout)
         # Shorts commands may go to the previewed tab only while this app is in front.
         app = QApplication.instance()
         if app is not None:
@@ -349,6 +391,18 @@ class MainWindow(QMainWindow):
         self.heartbeat_timer.start()
         self.stall_monitor.start()
 
+        self.settings_window = SettingsWindow(self)
+        self.set_focus_view(appearance.focus_view, save=False)
+        app = QApplication.instance()
+        active = theme.is_active()
+        if app is not None and (
+            (active and theme.tokens().name != appearance.theme)
+            or (not active and appearance.theme != theme.DEFAULT_THEME)
+        ):
+            theme.set_theme(app, appearance.theme, first=self)
+        # Themes are applied per window (child dialogs follow their parent).
+        for widget in (self, self.creator, self.tray.menu, self.settings_window):
+            theme.register(widget)
         self.services.start_activity()
         self._apply_camera_state(CameraState.STOPPED)
         log.info("interactive_scrolling %s started. All processing runs locally.", __version__)
@@ -357,8 +411,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ layout
 
     def _build_top_bar(self) -> QWidget:
-        """Product name, camera state, Camera settings, Normal/Broadcast and Start/Stop
-        camera. Everything else lives in the More menu, the session panel or the console."""
+        """Product name, camera state, theme, Studio / Broadcast, Settings and Start / Stop
+        camera. Everything else is in Settings, the side panels or the console."""
         bar = QFrame()
         bar.setObjectName("topBar")
         layout = QHBoxLayout(bar)
@@ -367,145 +421,134 @@ class MainWindow(QMainWindow):
         brand = QLabel("Interactive Scrolling")
         brand.setObjectName("brand")
         layout.addWidget(brand)
-        version = QLabel(f"beta {__version__}")
-        version.setObjectName("version")
-        version.setToolTip("Beta version. All processing runs on this computer.")
-        layout.addWidget(version)
-        layout.addSpacing(18)
+        self.version_label = QLabel(f"beta {__version__}")
+        self.version_label.setObjectName("version")
+        self.version_label.setToolTip("Beta version. All processing runs on this computer.")
+        layout.addWidget(self.version_label)
+        layout.addSpacing(14)
         self.status_pill = QLabel()
         self.status_pill.setObjectName("cameraStatus")
         layout.addWidget(self.status_pill)
         layout.addStretch(1)
 
-        self.camera_settings_button = QPushButton("Camera settings")
-        self.camera_settings_button.setObjectName("flatButton")
-        self.camera_settings_button.clicked.connect(self.open_camera_settings)
-        layout.addWidget(self.camera_settings_button)
-        layout.addSpacing(6)
-        self.mode_group = QButtonGroup(self)
-        self.mode_group.setExclusive(True)
-        self.mode_buttons: dict[str, QPushButton] = {}
-        for index, (mode, text, tip) in enumerate(
-            (
-                ("developer", "Normal", "The full application window"),
-                (
-                    "creator",
-                    "Broadcast",
-                    "A small always-on-top camera window over the browser, for recording and "
-                    "streaming (OBS). Does not change gesture control.",
-                ),
-            )
-        ):
-            button = QPushButton(text)
-            button.setObjectName("segment")
-            button.setCheckable(True)
-            button.setProperty("first", index == 0)
-            button.setProperty("last", index == 1)
-            button.setToolTip(tip)
-            button.clicked.connect(lambda _=False, m=mode: self.set_ui_mode(m))
-            self.mode_group.addButton(button)
-            self.mode_buttons[mode] = button
-            layout.addWidget(button)
-        self.mode_buttons["developer"].setChecked(True)
+        self.theme_control = SegmentedControl(list(THEMES))
+        self.theme_control.setAccessibleName("Theme")
+        self.theme_control.set_value(self.services.user_settings.appearance.theme)
+        self.theme_control.selected.connect(lambda name: self.set_theme(str(name)))
+        layout.addWidget(self.theme_control)
+        layout.addSpacing(4)
+        self.mode_control = SegmentedControl(list(PRESENTATION))
+        self.mode_control.setAccessibleName("Presentation mode")
+        self.mode_control.selected.connect(lambda mode: self.set_ui_mode(str(mode)))
+        self.mode_buttons: dict[str, QPushButton] = dict(self.mode_control.buttons)  # type: ignore[arg-type]
+        self.mode_control.set_value("developer")
         self.creator_button = self.mode_buttons["creator"]
-
-        self.more_button = QToolButton()
-        self.more_button.setObjectName("flatButton")
-        self.more_button.setText("More")
-        self.more_button.setToolTip("Background mode, gesture practice, reports, help")
-        self.more_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.more_button.setMenu(self._build_more_menu())
-        layout.addWidget(self.more_button)
-        layout.addSpacing(6)
-
+        layout.addWidget(self.mode_control)
+        layout.addSpacing(4)
+        self.settings_button = QPushButton("Settings")
+        self.settings_button.setObjectName("flatButton")
+        self.settings_button.setToolTip(
+            "All options: appearance, camera, gestures, eyes, effects, "
+            "Broadcast, browser, Doomscroll Together, statistics"
+        )
+        self.settings_button.clicked.connect(lambda: self.open_settings())
+        layout.addWidget(self.settings_button)
         self.start_button = QPushButton("Start camera")
         self.start_button.setObjectName("primaryButton")
         self.start_button.setMinimumWidth(118)
         self.start_button.clicked.connect(self._toggle_camera)
         layout.addWidget(self.start_button)
+        self._top_bar = bar
         return bar
 
-    def _build_more_menu(self) -> QMenu:
-        menu = QMenu(self)
-        self.more_menu = menu
-        entries: list[tuple[str, Callable[[], object]] | None] = [
-            ("Run in the background (tray)", lambda: self.set_ui_mode("background")),
-            ("Broadcast settings...", self.open_broadcast_settings),
-            None,
-            ("Practice gestures...", self.open_practice),
-            ("Gesture settings...", self.open_gesture_settings),
-            ("Face effects and eye analytics...", self.open_effects),
-            None,
-            ("Daily report...", self.open_report),
-            ("Browser setup and pairing...", self.open_browser_setup),
-            ("Copy diagnostics", self.copy_diagnostics),
-            ("Getting started", self.open_getting_started),
-        ]
-        for entry in entries:
-            if entry is None:
-                menu.addSeparator()
-                continue
-            text, slot = entry
-            action = QAction(text, menu)
-            action.triggered.connect(lambda _=False, s=slot: s())
-            menu.addAction(action)
-        menu.addSeparator()
-        self.eye_overlay_action = QAction("Show eye and gaze overlay (estimate)", menu)
-        self.eye_overlay_action.setCheckable(True)
-        self.eye_overlay_action.setChecked(self.services.user_settings.effects.eye_overlay)
-        self.eye_overlay_action.toggled.connect(self.set_eye_overlay)
-        menu.addAction(self.eye_overlay_action)
-        self.now_playing_action = QAction("Show Now playing", menu)
-        self.now_playing_action.setCheckable(True)
-        self.now_playing_action.toggled.connect(lambda on: self._set_now_playing(on))
-        menu.addAction(self.now_playing_action)
-        return menu
-
     def _build_body(self) -> QWidget:
-        body = QWidget()
-        layout = QHBoxLayout(body)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        stage = QWidget()
-        stage_layout = QHBoxLayout(stage)
-        stage_layout.setContentsMargins(18, 12, 18, 12)
-        stage_layout.setSpacing(18)
+        # ---- left: camera and gesture control
+        left = QWidget()
+        left.setObjectName("leftPanel")
+        column = QVBoxLayout(left)
+        column.setContentsMargins(18, 14, 14, 14)
+        column.setSpacing(8)
+        header = QHBoxLayout()
+        header.addWidget(self._column_title("Your camera"))
+        header.addStretch(1)
+        self.hand_state = QLabel("")
+        self.hand_state.setObjectName("dimHint")
+        header.addWidget(self.hand_state)
+        column.addLayout(header)
+        column.addWidget(self.video)
+        self.session_block = QWidget()
+        block = QHBoxLayout(self.session_block)
+        block.setContentsMargins(0, 4, 0, 2)
+        caption = QLabel("Session time")
+        caption.setObjectName("sectionTitle")
+        caption.setToolTip("Scrolling time in the current scrolling session")
+        block.addWidget(caption, 0, Qt.AlignmentFlag.AlignBottom)
+        block.addStretch(1)
+        self.session_clock = QLabel("0:00")
+        self.session_clock.setObjectName("sessionClock")
+        block.addWidget(self.session_clock)
+        column.addWidget(self.session_block)
+        line = QFrame()
+        line.setObjectName("separator")
+        column.addWidget(line)
+        column.addWidget(self.control_bar)
+        column.addStretch(1)
+        self.left_scroll = QScrollArea()
+        self.left_scroll.setWidget(left)
+        self.left_scroll.setWidgetResizable(True)
+        self.left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.left_scroll.setMinimumWidth(LEFT_MIN_WIDTH)
+        self.left_scroll.setMaximumWidth(LEFT_MAX_WIDTH)
+        self._left_panel = left
+        left.installEventFilter(self)
 
-        camera = QWidget()
-        camera_layout = QVBoxLayout(camera)
-        camera_layout.setContentsMargins(0, 0, 0, 0)
-        camera_layout.setSpacing(6)
-        camera_layout.addWidget(self._column_title("Your camera"))
-        camera_layout.addWidget(self.video)
-        camera_layout.addWidget(self.control_bar)
-        camera_layout.addStretch(1)
-        self._camera_column = camera
-        stage_layout.addWidget(camera, 1)
-
-        self.now_playing = QWidget()
-        playing = QVBoxLayout(self.now_playing)
-        playing.setContentsMargins(0, 0, 0, 0)
-        playing.setSpacing(6)
-        playing.addWidget(self._column_title("Now playing"))
-        playing.addWidget(self.preview, 1)
+        # ---- centre: the live Short
+        cinema = QWidget()
+        cinema.setObjectName("cinema")
+        stage = QVBoxLayout(cinema)
+        stage.setContentsMargins(20, 16, 20, 10)
+        stage.setSpacing(8)
+        stage.addWidget(self.preview, 1)
+        row = QHBoxLayout()
+        self.preview_dot = QLabel("●")
+        self.preview_dot.setObjectName("statusDot")
+        row.addWidget(self.preview_dot)
         self.preview_info = QLabel("")
-        self.preview_info.setObjectName("dimHint")
-        self.preview_info.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        playing.addWidget(self.preview_info)
-        self.now_playing.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        stage_layout.addWidget(self.now_playing)
-        layout.addWidget(stage, 1)
+        self.preview_info.setObjectName("hint")
+        row.addWidget(self.preview_info)
+        row.addStretch(1)
+        self.focus_button = QPushButton("Focus view")
+        self.focus_button.setObjectName("flatButton")
+        self.focus_button.setCheckable(True)
+        self.focus_button.setToolTip("Show only the camera, the Short and gesture control")
+        self.focus_button.toggled.connect(self.set_focus_view)
+        row.addWidget(self.focus_button)
+        stage.addLayout(row)
+        cinema.setMinimumWidth(CINEMA_MIN_WIDTH)
+        self.cinema = cinema
+        # Compatibility: the Short column was called Now playing before Brief 010.
+        self.now_playing = cinema
 
-        self.session_panel.setFixedWidth(292)
-        layout.addWidget(self.session_panel)
-        self._stage = stage
-        stage.installEventFilter(self)
-        return body
+        # ---- the splitter: camera | Short | Your session
+        self.workspace = QSplitter(Qt.Orientation.Horizontal)
+        self.workspace.setObjectName("workspace")
+        self.workspace.setChildrenCollapsible(False)
+        self.workspace.setHandleWidth(1)
+        self.workspace.addWidget(self.left_scroll)
+        self.workspace.addWidget(cinema)
+        self.workspace.addWidget(self.session_panel)
+        self.workspace.setStretchFactor(0, 0)
+        self.workspace.setStretchFactor(1, 1)
+        self.workspace.setStretchFactor(2, 0)
+        self.workspace.splitterMoved.connect(lambda *_: self._layout_timer.start())
+        self._apply_panel_widths()
+        return self.workspace
 
     def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
-        # The stage changes size with the window and when the console opens or closes.
-        if watched is getattr(self, "_stage", None) and event.type() == QEvent.Type.Resize:
-            self._fit_now_playing()
+        # The camera keeps its picture's shape at the width of the left panel.
+        if watched is getattr(self, "_left_panel", None) and event.type() == QEvent.Type.Resize:
+            self._fit_camera()
         return super().eventFilter(watched, event)
 
     @staticmethod
@@ -513,6 +556,145 @@ class MainWindow(QMainWindow):
         label = QLabel(text)
         label.setObjectName("sectionTitle")
         return label
+
+    def _camera_aspect(self) -> float:
+        frame = self.video.frame
+        if frame is not None:
+            h, w = frame.image_rgb.shape[:2]
+            return w / max(1, h)
+        width, height = self.resolution_combo.currentData()
+        return width / max(1, height)
+
+    def _fit_camera(self) -> None:
+        """The camera view is as wide as the panel and as tall as the picture's aspect needs
+        (no cropping: the whole image, hands at the edges included, stays visible)."""
+        left = getattr(self, "_left_panel", None)
+        if left is None:
+            return
+        margins = left.layout().contentsMargins()
+        width = max(200, left.width() - margins.left() - margins.right())
+        height = round(width / self._camera_aspect())
+        if self.video.height() != height:
+            self.video.setFixedHeight(max(150, height))
+            self.video.setMinimumWidth(200)
+
+    def _apply_panel_widths(self) -> None:
+        a = self.services.user_settings.appearance
+        left = min(LEFT_MAX_WIDTH, max(LEFT_MIN_WIDTH, a.left_panel_width or LEFT_DEFAULT_WIDTH))
+        if self.session_panel.expanded:
+            right = a.session_panel_width or SESSION_DEFAULT_WIDTH
+            right = min(SESSION_MAX_WIDTH, max(SESSION_MIN_WIDTH, right))
+        else:
+            right = STRIP_WIDTH
+        total = max(self.workspace.width(), left + right + CINEMA_MIN_WIDTH)
+        self.workspace.setSizes([left, total - left - right, right])
+        handle = self.workspace.handle(2)
+        if handle is not None:
+            handle.setEnabled(self.session_panel.expanded)
+
+    def _save_layout(self) -> None:
+        sizes = self.workspace.sizes()
+        if len(sizes) != 3 or not self.isVisible():
+            return
+        a = self.services.user_settings.appearance
+        changes: dict[str, object] = {}
+        if not a.focus_view and self.left_scroll.isVisible() and sizes[0] != a.left_panel_width:
+            changes["left_panel_width"] = sizes[0]
+        expanded = self.session_panel.expanded and self.session_panel.isVisible()
+        if expanded and sizes[2] != a.session_panel_width:
+            changes["session_panel_width"] = sizes[2]
+        if changes:
+            self.services.update_settings(appearance=replace(a, **changes))
+
+    def reset_layout(self) -> None:
+        """Default widths, Your session expanded, diagnostics collapsed, Focus view off."""
+        a = self.services.user_settings.appearance
+        self.services.update_settings(
+            appearance=replace(
+                a,
+                left_panel_width=0,
+                session_panel_width=0,
+                session_panel_expanded=True,
+                console_expanded=False,
+                focus_view=False,
+            )
+        )
+        self.set_focus_view(False, save=False)
+        self.session_panel.set_expanded(True, notify=False)
+        self.console.set_expanded(False, notify=False)
+        self._apply_panel_widths()
+        self.settings_window.refresh()
+        log.info("Layout restored to the default.")
+
+    def set_session_panel_expanded(self, expanded: bool) -> None:
+        if self.session_panel.expanded != expanded:
+            self.session_panel.set_expanded(expanded)
+        elif expanded and self.focus_view:
+            self.set_focus_view(False)
+
+    def _session_panel_toggled(self, expanded: bool) -> None:
+        """Collapsing only hides widgets: Together, its permissions and the preview go on."""
+        a = self.services.user_settings.appearance
+        if a.session_panel_expanded != expanded:
+            self.services.update_settings(appearance=replace(a, session_panel_expanded=expanded))
+        self._apply_panel_widths()
+        self.settings_window.refresh()
+
+    def set_console_expanded(self, expanded: bool) -> None:
+        self.console.set_expanded(expanded)
+
+    focus_view = False
+
+    def set_focus_view(self, on: bool, save: bool = True) -> None:
+        """Focus view: camera, Short and gesture control only. A layout preference, not a
+        mode: nothing stops; Stop gesture control stays visible."""
+        on = bool(on)
+        self.focus_view = on
+        self.session_panel.setVisible(not on)
+        self.console.setVisible(not on)
+        self.session_block.setVisible(not on)
+        for widget in self.control_bar.secondary_widgets():
+            widget.setVisible(not on)
+        if self.focus_button.isChecked() != on:
+            self.focus_button.blockSignals(True)
+            self.focus_button.setChecked(on)
+            self.focus_button.blockSignals(False)
+        self.focus_button.setText("Exit focus view" if on else "Focus view")
+        a = self.services.user_settings.appearance
+        if save and a.focus_view != on:
+            self.services.update_settings(appearance=replace(a, focus_view=on))
+        settings_window = getattr(self, "settings_window", None)
+        if settings_window is not None:
+            settings_window.refresh()
+
+    def set_theme(self, name: str) -> None:
+        """Switch the theme at runtime. Only styles change: the camera, models, gesture
+        control, browser capture and Doomscroll Together are not touched."""
+        if name not in theme.THEMES:
+            return
+        app = QApplication.instance()
+        with self.stall_monitor.section("theme switch"):
+            if app is not None:
+                theme.set_theme(app, name, first=self)
+            a = self.services.user_settings.appearance
+            if a.theme != name:
+                self.services.update_settings(appearance=replace(a, theme=name))
+            self.theme_control.set_value(name)
+            self.creator.update()
+            settings_window = getattr(self, "settings_window", None)
+            if settings_window is not None:
+                settings_window.refresh()
+        log.info("Theme: %s", name)
+
+    def _toggle_layer(self, field: str, on: bool) -> None:
+        """Tracking-layer shortcut under the camera (the same options as Settings)."""
+        if field == "eyes":
+            self.set_eye_overlay(on)
+            return
+        box = self.overlay_panel.checkboxes.get(field)
+        if box is not None and box.isChecked() != on:
+            box.setChecked(on)  # updates OverlaySettings and repaints the view
+        self.settings_window.refresh()
 
     def _build_console(self) -> QWidget:
         self.capture_fps_label = QLabel()
@@ -537,6 +719,13 @@ class MainWindow(QMainWindow):
         ]
         for label, tip in labels:
             label.setToolTip(tip)
+        self.camera_details = QLabel()
+        self.eye_details = QLabel()
+        for label in (self.camera_details, self.eye_details):
+            label.setObjectName("consoleText")
+            label.setFont(theme.mono_font(8.5))
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.connection_details = QLabel()
         self.connection_details.setObjectName("hint")
         self.connection_details.setWordWrap(True)
@@ -550,6 +739,8 @@ class MainWindow(QMainWindow):
             [self.performance_panel, self.tracking_panel, self.motion_panel],
             [self.connection_details],
             expanded=self.services.user_settings.appearance.console_expanded,
+            camera=[self.camera_details],
+            eyes=[self.eye_details],
         )
         self.activity_log = self.console.activity_log
         self.console.copy_requested.connect(self.copy_diagnostics)
@@ -560,44 +751,18 @@ class MainWindow(QMainWindow):
         appearance = self.services.user_settings.appearance
         if appearance.console_expanded != expanded:
             self.services.update_settings(appearance=replace(appearance, console_expanded=expanded))
-
-    def _set_now_playing(self, shown: bool, save: bool = True) -> None:
-        self.now_playing.setVisible(shown)
-        if self.now_playing_action.isChecked() != shown:
-            self.now_playing_action.setChecked(shown)
-        self._fit_now_playing()
-        appearance = self.services.user_settings.appearance
-        if save and appearance.show_now_playing != shown:
-            self.services.update_settings(appearance=replace(appearance, show_now_playing=shown))
-            if not shown:
-                # A hidden preview must not keep the browser capturing.
-                self.stop_preview()
-
-    def _fit_now_playing(self) -> None:
-        """The Now playing column is as wide as a Short of the stage's height (9:16), within
-        limits that keep the camera usable."""
-        stage = getattr(self, "_stage", None)
-        if stage is None:
-            return
-        chrome = 24 + 30  # stage margins and the column title
-        height = max(200, stage.height() - chrome - 24)
-        width = int(height * 9 / 16)
-        width = max(170, min(width, int(stage.width() * 0.36)))
-        self.now_playing.setFixedWidth(width)
-        # The camera image keeps 16:9 at the top of its column with the gesture strip right
-        # under it; on short windows it shrinks to leave room for the strip.
-        camera_width = stage.width() - 36 - (width + 18 if self.now_playing.isVisible() else 0)
-        strip = self.control_bar.sizeHint().height()
-        video_height = min(int(camera_width * 9 / 16), stage.height() - chrome - strip - 12)
-        self.video.setFixedHeight(max(160, video_height))
+        settings_window = getattr(self, "settings_window", None)
+        if settings_window is not None:
+            settings_window.refresh()
 
     def resizeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         super().resizeEvent(event)
-        self._fit_now_playing()
+        # Narrow windows (a laptop at 150 %): the version label gives way first.
+        self.version_label.setVisible(self.width() >= 1100)
 
     def showEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         super().showEvent(event)
-        QTimer.singleShot(0, self._fit_now_playing)
+        QTimer.singleShot(0, self._fit_camera)
 
     # ------------------------------------------------------------------ dialogs
 
@@ -611,15 +776,14 @@ class MainWindow(QMainWindow):
         dialog.activateWindow()
         return dialog
 
+    def open_settings(self, page: str = "general") -> None:
+        self.settings_window.open_page(page)
+
     def open_camera_settings(self) -> None:
-        self.camera_dialog.show()
-        self.camera_dialog.raise_()
-        self.camera_dialog.activateWindow()
+        self.open_settings("camera")
 
     def open_browser_setup(self) -> None:
-        self._dialog(
-            "browser", lambda: PanelDialog("Browser setup and pairing", [self.youtube_panel], self)
-        )
+        self.open_settings("browser")
 
     def open_report(self) -> None:
         self._dialog(
@@ -628,39 +792,48 @@ class MainWindow(QMainWindow):
         )
 
     def open_broadcast_settings(self) -> None:
-        from interactive_scrolling.ui.broadcast_settings import BroadcastSettingsDialog
+        self.open_settings("broadcast")
 
-        existing = self._dialogs.pop("broadcast", None)
-        if existing is not None:
-            existing.close()
-        dialog = BroadcastSettingsDialog(
-            lambda: self.creator.settings,
-            self.services.user_settings.effects,
-            self.segmenter is not None,
-        )
-        dialog.creator_changed.connect(self._apply_creator)
-        dialog.corner_requested.connect(self.creator.move_to_corner)
-        dialog.effects_changed.connect(self._apply_effects)
-        dialog.face_effects_requested.connect(self.open_effects)
-        self._dialogs["broadcast"] = dialog
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
-
-    def _apply_creator(self, settings) -> None:  # type: ignore[no-untyped-def]
+    def apply_creator(self, settings) -> None:  # type: ignore[no-untyped-def]
         self.creator.apply_settings(settings)
         self.services.update_settings(creator=settings)
 
-    def _apply_effects(self, effects) -> None:  # type: ignore[no-untyped-def]
+    _apply_creator = apply_creator
+
+    def apply_effects(self, effects) -> None:  # type: ignore[no-untyped-def]
         self.services.apply_effects(effects)
         self._update_face_worker()
-        action = getattr(self, "eye_overlay_action", None)
-        if action is not None and action.isChecked() != effects.eye_overlay:
-            action.blockSignals(True)
-            action.setChecked(effects.eye_overlay)
-            action.blockSignals(False)
+        self.control_bar.set_layers({"eyes": effects.eye_overlay})
         if effects.clown_preview_stage is not None:
             self.clown.jump_to_stage(effects.clown_preview_stage)
+
+    _apply_effects = apply_effects
+
+    def apply_appearance(self, appearance) -> None:  # type: ignore[no-untyped-def]
+        self.video.set_appearance(appearance)
+        self.creator.set_appearance(appearance)
+        self.services.update_settings(appearance=appearance)
+
+    def apply_gesture_settings(self, settings, mapping) -> None:  # type: ignore[no-untyped-def]
+        self.services.apply_gesture_settings(settings)
+        self.services.apply_mapping(mapping)
+        log.info("Gesture settings saved.")
+
+    def apply_together(self, settings: TogetherSettings) -> None:
+        self.services.update_settings(together=settings)
+        self.coop_panel.player_name = settings.player_name or "Player 1"
+        self.coop_panel.host_port = settings.host_port
+
+    def set_analytics_enabled(self, enabled: bool) -> None:
+        self.services.set_analytics_enabled(enabled)
+        box = self.today_panel.enabled
+        if box.isChecked() != enabled:
+            box.blockSignals(True)
+            box.setChecked(enabled)
+            box.blockSignals(False)
+
+    def show_notice(self, text: str) -> None:
+        self.control_bar.set_last(text)
 
     def stop_preview(self) -> None:
         controller = self.services.controller
@@ -674,7 +847,7 @@ class MainWindow(QMainWindow):
         return getattr(bridge, "preview", None)
 
     def _refresh_preview(self) -> None:
-        if self.now_playing.isVisible() and self.isVisible():
+        if self.preview.isVisible() and self.isVisible():
             with self.stall_monitor.section("preview"):
                 self.preview.refresh()
 
@@ -692,7 +865,7 @@ class MainWindow(QMainWindow):
             index=int(self.camera_combo.currentData()),
             width=width,
             height=height,
-            fps=int(self.camera_dialog.fps_combo.currentData()),
+            fps=int(self.camera_form.fps_combo.currentData()),
             backend=base.backend,
         )
 
@@ -745,7 +918,7 @@ class MainWindow(QMainWindow):
         self.start_button.setProperty("running", running)
         self.start_button.setEnabled(state is not CameraState.STOPPING)
         idle = state in (CameraState.STOPPED, CameraState.ERROR)
-        self.camera_dialog.set_idle(idle, self._probe_cameras is not None)
+        self.camera_form.set_idle(idle, self._probe_cameras is not None)
         for widget in (self.status_pill, self.start_button):
             repolish(widget)
         if not running:
@@ -779,10 +952,12 @@ class MainWindow(QMainWindow):
         self.video.set_frame(frame)
         if self.creator.isVisible():
             self.creator.show_frame(frame)
-        self.tracking_panel.update_tracking(frame.tracking)
-        self.motion_panel.update_motion(frame, self.video.mirrored)
-        enabled = self.services.dispatcher.mode is not ControlMode.TRACKING_ONLY
-        self.gesture_panel.show_frame(frame.gestures, enabled)
+        if self.console.showing:
+            # Detail panels only while the console shows them (no hidden widget updates).
+            self.tracking_panel.update_tracking(frame.tracking)
+            self.motion_panel.update_motion(frame, self.video.mirrored)
+            enabled = self.services.dispatcher.mode is not ControlMode.TRACKING_ONLY
+            self.gesture_panel.show_frame(frame.gestures, enabled)
         practice = getattr(self, "practice_dialog", None)
         if practice is not None and practice.isVisible():
             practice.show_frame(frame)
@@ -865,7 +1040,7 @@ class MainWindow(QMainWindow):
             return
         self.ui_mode = mode
         if mode in self.mode_buttons:
-            self.mode_buttons[mode].setChecked(True)
+            self.mode_control.set_value(mode)
         if mode == "developer":
             self.creator.hide()
             self.showNormal()
@@ -929,20 +1104,16 @@ class MainWindow(QMainWindow):
     def set_eye_overlay(self, enabled: bool) -> None:
         effects = self.services.user_settings.effects
         if effects.eye_overlay != enabled:
-            self._apply_effects(replace(effects, eye_overlay=enabled))
-        if self.eye_overlay_action.isChecked() != enabled:
-            self.eye_overlay_action.setChecked(enabled)
+            self.apply_effects(replace(effects, eye_overlay=enabled))
+        self.control_bar.set_layers({"eyes": enabled})
+        self.settings_window.refresh()
 
     def _paint_clown(self, painter, transform, frame) -> None:  # type: ignore[no-untyped-def]
         if self.services.user_settings.effects.clown_enabled:
             self.clown.paint(painter, transform)
 
     def open_effects(self) -> None:
-        dialog = EffectsDialog(self.services.user_settings.effects, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.services.apply_effects(dialog.result_settings())
-            self._update_face_worker()
-            log.info("Face effect settings saved.")
+        self.open_settings("effects")
 
     def calibrate_eyes(self) -> None:
         if self.face_worker is None:
@@ -970,6 +1141,7 @@ class MainWindow(QMainWindow):
             )
             self.services.apply_effects(effects)
             log.info("Eye analytics calibrated (%d samples).", result.samples)
+        self.settings_window.refresh()
 
     def wrapped_data(self, scope: str):  # type: ignore[no-untyped-def]
         """Real statistics for Doomscroll Wrapped, or ``None`` if none are available."""
@@ -1101,26 +1273,14 @@ class MainWindow(QMainWindow):
         WrappedDialog(image, f"duo-wrapped-{datetime.now():%Y-%m-%d-%H%M}.png", self).exec()
 
     def open_wellbeing(self) -> None:
-        dialog = WellbeingDialog(self.services.user_settings.wellbeing, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.services.apply_wellbeing(dialog.result_settings())
-            log.info("Limits and reminders saved.")
+        self.open_settings("analytics")
 
     def _on_notice(self, notice) -> None:  # type: ignore[no-untyped-def]
         self.video.show_gesture(notice.title.upper(), palette.ACCENT_AMBER)
         self.tray.notify(notice.title, notice.text)
 
     def open_appearance(self) -> None:
-        user = self.services.user_settings
-        dialog = AppearanceDialog(user.appearance, self.creator.settings, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            appearance = dialog.result_appearance()
-            creator = dialog.result_creator()
-            self.video.set_appearance(appearance)
-            self.creator.set_appearance(appearance)
-            self.creator.apply_settings(creator, reposition=True)
-            self.services.update_settings(appearance=appearance, creator=creator)
-            log.info("Appearance saved.")
+        self.open_settings("appearance")
 
     def _data_folder(self) -> Path:
         store = self.services.store
@@ -1201,6 +1361,7 @@ class MainWindow(QMainWindow):
             from dataclasses import replace
 
             self.services.update_settings(appearance=replace(appearance, getting_started_done=done))
+        self.settings_window.refresh()
 
     def show_getting_started_if_new(self) -> None:
         """First start: show the guide once (real application only)."""
@@ -1225,13 +1386,10 @@ class MainWindow(QMainWindow):
         store.migrations = [m for m in store.migrations if m not in notices]
 
     def open_gesture_settings(self) -> None:
-        dialog = GestureSettingsDialog(
-            self.services.engine.settings, self.services.dispatcher.mapping, self
-        )
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.services.apply_gesture_settings(dialog.result_settings())
-            self.services.apply_mapping(dialog.result_mapping())
-            log.info("Gesture settings saved.")
+        self.open_settings("gestures")
+
+    def clear_statistics(self) -> None:
+        self._clear_statistics()
 
     def _clear_statistics(self) -> None:
         analytics = self.services.analytics
@@ -1253,10 +1411,7 @@ class MainWindow(QMainWindow):
         preview = feed.status() if feed is not None else None
         self.session_panel.browser.show_status(status, preview)
         self.preview.set_status(preview, status is not None and status.connections > 0)
-        if preview is not None and preview.connected:
-            self.preview_info.setText(f"Live from your browser · {preview.fps:.0f} fps")
-        else:
-            self.preview_info.setText("")
+        self._show_preview_state(status, preview)
         # Reports are computed on the services' activity thread; the UI only displays them.
         services = self.services
         analytics = services.analytics
@@ -1276,7 +1431,9 @@ class MainWindow(QMainWindow):
         )
         self.performance_panel.show_report(services.performance)
         coop = services.coop_status()
-        self.coop_panel.show_status(coop)
+        self.session_panel.show_coop(coop)
+        session_s = services.current_session_s()
+        self.session_clock.setText(short_duration(session_s))
         self.connection_details.setText(self._connection_text(status, preview, coop))
         if self.creator.isVisible():
             self.creator.counters_text = broadcast_counters(
@@ -1289,6 +1446,21 @@ class MainWindow(QMainWindow):
             services.eye_report,
         )
         self._stats_tick += 1
+
+    def _show_preview_state(self, status, preview) -> None:  # type: ignore[no-untyped-def]
+        """One line under the Short: live (with its frame rate), waiting, off or no browser."""
+        if preview is not None and preview.live:
+            state, text = "ok", f"Live from your browser · {preview.fps:.0f} fps"
+        elif preview is not None and preview.connected:
+            state, text = "warn", "Live preview paused: the tab is not showing a Short"
+        elif status is None or status.connections == 0:
+            state, text = "error", "Browser not connected"
+        else:
+            state, text = "", "Live preview off"
+        if self.preview_dot.property("state") != state:
+            self.preview_dot.setProperty("state", state)
+            repolish(self.preview_dot)
+        self.preview_info.setText(text)
 
     def _connection_text(self, status, preview, coop) -> str:  # type: ignore[no-untyped-def]
         """Technical connection details for the console (no codes, tokens or URLs)."""
@@ -1393,16 +1565,94 @@ class MainWindow(QMainWindow):
                 f"CPU {sample.cpu_percent_of_machine:4.1f}%  RAM {sample.rss_mb:.0f} MB"
             )
         self.resources_label.setText(self._last_resource_text)
-        self.performance_panel.show_live(m, self.pipeline.gesture_ms_mean if live else None)
-        if self.camera_dialog.isVisible():
+        self._show_hand_state(live)
+        if self.console.showing:
+            self.performance_panel.show_live(m, self.pipeline.gesture_ms_mean if live else None)
+            tab = self.console.current_tab()
+            if tab == "Camera":
+                self.camera_details.setText(self._camera_text(m, live))
+            elif tab == "Eye tracking":
+                self.eye_details.setText(self._eye_text())
+        if self.camera_form.isVisible():
+            requested = int(self.camera_form.fps_combo.currentData())
             if live:
-                self.camera_dialog.show_diagnostics(
-                    f"Running: {m.capture_fps:.1f} frames per second delivered, "
-                    f"processing {m.processing_fps:.1f} per second, latency "
-                    f"{fmt(m.latency_ms, 'ms')}."
+                self.camera_form.show_measured(
+                    f"{m.capture_fps:.1f} fps delivered (requested {requested})",
+                    f"Processing {m.processing_fps:.1f} frames per second, latency "
+                    f"{fmt(m.latency_ms, 'ms')}, {m.frames_dropped} outdated frames skipped.",
                 )
             else:
-                self.camera_dialog.show_diagnostics("Camera off.")
+                self.camera_form.show_measured("Camera off")
+
+    def _camera_text(self, m, live: bool) -> str:  # type: ignore[no-untyped-def]
+        requested = self.requested_camera_settings()
+        lines = [
+            f"Requested      {requested.width}x{requested.height} at {requested.fps} fps "
+            f"(device {requested.index})",
+        ]
+        if not live:
+            lines.append("Camera         off")
+            return chr(10).join(lines)
+        lines += [
+            f"Delivered      {m.frame_width}x{m.frame_height}, {m.capture_fps:.1f} fps measured",
+            f"Processed      {m.processing_fps:.1f} fps (hand inference "
+            f"{m.inference_ms:.1f} ms mean)"
+            if m.inference_ms is not None
+            else f"Processed      {m.processing_fps:.1f} fps",
+            f"Frames         {m.frames_captured} captured, {m.frames_processed} processed, "
+            f"{m.frames_dropped} outdated skipped (bounded two-frame buffer)",
+            f"Latency        capture to result {m.latency_ms or 0:.1f} ms mean, "
+            f"p95 {m.latency_p95_ms or 0:.0f} ms",
+            f"Displayed      {self.video.display_rate.rate():.1f} fps on screen",
+        ]
+        return chr(10).join(lines)
+
+    def _eye_text(self) -> str:
+        effects = self.services.user_settings.effects
+        worker = self.face_worker
+        if worker is None:
+            return "Face landmarks: not available in this build."
+        lines = [
+            f"Face landmarks  {worker.state}"
+            + (f" ({worker.message})" if worker.message else "")
+            + f", {worker.processed} frames processed, "
+            + (
+                f"{worker.inference.mean():.1f} ms mean"
+                if worker.inference.mean() is not None
+                else "no timing yet"
+            ),
+            f"Features on     overlay {'yes' if effects.eye_overlay else 'no'}, analytics "
+            f"{'yes' if effects.eye_analytics_enabled else 'no'}, clown "
+            f"{'yes' if effects.clown_enabled else 'no'}",
+            "Calibration     "
+            + ("screen-facing baseline set" if effects.eye_baseline_yaw is not None else "none")
+            + "; screen gaze accuracy: not measured",
+        ]
+        estimate = self.eyes.estimate if effects.eye_overlay else None
+        if estimate is None:
+            lines.append("Estimate        none (overlay off, no face, or tracking lost)")
+        else:
+            lines += [
+                f"Head pose       yaw {estimate.head_yaw_deg:+.0f} deg, pitch "
+                f"{estimate.head_pitch_deg:+.0f} deg, roll {estimate.head_roll_deg:+.0f} deg",
+                f"Gaze estimate   yaw {estimate.gaze_yaw_deg:+.0f} deg, pitch "
+                f"{estimate.gaze_pitch_deg:+.0f} deg (estimate, not a measured line of sight)",
+                f"Quality         {estimate.quality:.2f} "
+                f"({'shown' if estimate.usable else 'hidden: below 0.35'})",
+            ]
+        return chr(10).join(lines)
+
+    def _show_hand_state(self, live: bool) -> None:
+        frame = self.video.frame
+        if not live or frame is None:
+            text = ""
+        elif frame.tracking.hand_count:
+            hands = frame.tracking.hand_count
+            text = f"● {hands} hand{'s' if hands > 1 else ''} in view"
+        else:
+            text = "No hand in view"
+        if self.hand_state.text() != text:
+            self.hand_state.setText(text)
 
     def _report_stall(self, stall: Stall) -> None:
         # Called on the watchdog thread; logging is thread safe and reaches the UI queued.
@@ -1421,7 +1671,7 @@ class MainWindow(QMainWindow):
         self.preview_timer.stop()
         for dialog in self._dialogs.values():
             dialog.close()
-        self.camera_dialog.close()
+        self.settings_window.close()
         self.tray.hide()
         if self.segmenter is not None:
             self.segmenter.shutdown()
